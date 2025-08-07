@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { ReactReader } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, Home, RotateCcw, Bookmark, BookmarkCheck, MoreVertical } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2 } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType } from '../lib/progressService'
 
 interface EpubReaderProps {
@@ -13,7 +13,7 @@ interface EpubReaderProps {
   toggleDarkMode?: () => void
 }
 
-export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary }) => {
+export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode }) => {
   const [location, setLocation] = useState<string | number>(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -24,9 +24,72 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const [bookmarks, setBookmarks] = useState<BookmarkType[]>([])
   const [showBookmarks, setShowBookmarks] = useState(false)
   const [isBookmarked, setIsBookmarked] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
   const renditionRef = useRef<any>(null)
   const tocRef = useRef<any>(null)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
   
+  // Sayfa bilgileri için yeni state'ler
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [currentChapter, setCurrentChapter] = useState('')
+  const [, setToc] = useState<any[]>([])
+
+  // Component mount olduğunda debug bilgisi
+  useEffect(() => {
+    console.log('EpubReader mounted with props:', {
+      bookUrl,
+      bookTitle,
+      bookId,
+      userId,
+      isDarkMode
+    })
+  }, [])
+
+  // Menü dış tıklamada kapanması için
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      
+      // Menü için
+      if (showMenu && !target.closest('.menu-container')) {
+        setShowMenu(false)
+      }
+      
+      // Yer işaretleri paneli için
+      if (showBookmarks && !target.closest('.bookmark-panel')) {
+        setShowBookmarks(false)
+      }
+      
+      // Ayarlar paneli için
+      if (showSettings && !target.closest('.settings-panel')) {
+        setShowSettings(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showMenu, showBookmarks, showSettings])
+
+  // ESC tuşu ile panelleri kapatma
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (showSettings) {
+          setShowSettings(false)
+        } else if (showBookmarks) {
+          setShowBookmarks(false)
+        } else if (showMenu) {
+          setShowMenu(false)
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [showSettings, showBookmarks, showMenu])
+
   // Timeout için yükleme kontrolü
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -39,43 +102,206 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
     return () => clearTimeout(timeout)
   }, [isLoading])
-  
+
+  // Dark mode değiştiğinde reader theme'ini güncelle
+  useEffect(() => {
+    const newTheme = isDarkMode ? 'dark' : 'light'
+    console.log('Dark mode değişti, yeni tema:', newTheme)
+    setReaderTheme(newTheme)
+    if (renditionRef.current) {
+      changeTheme(newTheme)
+    }
+    
+    // iframe'leri doğrudan manipüle et
+    setTimeout(() => {
+      const iframes = document.querySelectorAll('.react-reader-container iframe')
+      iframes.forEach((iframe: any) => {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+          if (iframeDoc) {
+            if (isDarkMode) {
+              iframeDoc.body.style.backgroundColor = '#0f172a'
+              iframeDoc.body.style.color = '#e5e7eb'
+              iframeDoc.documentElement.style.backgroundColor = '#0f172a'
+              iframeDoc.documentElement.style.color = '#e5e7eb'
+              
+              // Tüm elementleri koyu yap
+              const allElements = iframeDoc.querySelectorAll('*')
+              allElements.forEach((el: any) => {
+                if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
+                  el.style.backgroundColor = 'transparent'
+                  el.style.color = '#e5e7eb'
+                }
+              })
+            } else {
+              iframeDoc.body.style.backgroundColor = '#ffffff'
+              iframeDoc.body.style.color = '#1f2937'
+              iframeDoc.documentElement.style.backgroundColor = '#ffffff'
+              iframeDoc.documentElement.style.color = '#1f2937'
+              
+              // Tüm elementleri açık yap
+              const allElements = iframeDoc.querySelectorAll('*')
+              allElements.forEach((el: any) => {
+                if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
+                  el.style.backgroundColor = 'transparent'
+                  el.style.color = '#1f2937'
+                }
+              })
+            }
+          }
+        } catch (error) {
+          console.log('iframe manipülasyon hatası:', error)
+        }
+      })
+    }, 100)
+  }, [isDarkMode])
+
   const locationChanged = useCallback((epubcifi: string) => {
     setLocation(epubcifi)
     
-    // İlerleme yüzdesini hesapla
+    // İlerleme yüzdesini ve sayfa bilgilerini hesapla
     if (renditionRef.current) {
-      const book = renditionRef.current.book
-      if (book && book.locations && book.locations.percentageFromCfi) {
-        try {
-          const percentagePromise = book.locations.percentageFromCfi(epubcifi)
-          if (percentagePromise && typeof percentagePromise.then === 'function') {
-            percentagePromise.then((percentage: number) => {
-              const progress = Math.round(percentage * 100)
-              setProgressPercentage(progress)
-              
-              // İlerlemeyi kaydet (debounce ile)
-              if (userId && bookId) {
-                saveReadingProgress(userId, bookId, epubcifi, progress)
-              }
-            }).catch((error: any) => {
-              console.warn('İlerleme hesaplama hatası:', error)
-              setProgressPercentage(0)
-            })
-          } else {
-            // Locations henüz hazır değilse varsayılan değer
-            setProgressPercentage(0)
+      const rendition = renditionRef.current
+      const book = rendition.book
+      
+      // Mevcut sayfa bilgilerini al
+      try {
+        if (rendition.location) {
+          const location = rendition.location
+          if (location.start) {
+            // Mevcut bölüm bilgisini güncelle
+            const currentSpine = book.spine.get(location.start.href)
+            if (currentSpine) {
+              setCurrentChapter(currentSpine.navitem?.label || currentSpine.href || 'Bilinmeyen Bölüm')
+            }
+            
+            // Mevcut sayfa ve toplam sayfa bilgilerini al (sadece mevcut bölüm için)
+            if (location.start.displayed && location.end.displayed) {
+              setCurrentPage(location.start.displayed.page || 1)
+              setTotalPages(location.start.displayed.total || 1)
+            }
           }
-        } catch (error) {
-          console.warn('İlerleme hesaplama hatası:', error)
-          setProgressPercentage(0)
         }
+      } catch (error) {
+        console.warn('Sayfa bilgileri alınırken hata:', error)
       }
+      
+      // İlerleme yüzdesini hesapla - Gelişmiş sistem
+      calculateAdvancedProgress(book, epubcifi)
     }
     
     // Mevcut konumun bookmark olup olmadığını kontrol et
     checkCurrentBookmark(epubcifi)
   }, [userId, bookId])
+
+  // Gelişmiş ilerleme hesaplama fonksiyonu
+  const calculateAdvancedProgress = (book: any, cfi: string) => {
+    try {
+      let progress = 0
+      
+      // Önce locations API'sini kullan (en doğru)
+      if (book.locations && book.locations.length()) {
+        try {
+          const percentage = book.locations.percentageFromCfi(cfi)
+          if (typeof percentage === 'number' && !isNaN(percentage)) {
+            progress = Math.round(percentage * 100)
+            setProgressPercentage(progress)
+            
+            if (userId && bookId) {
+              saveReadingProgress(userId, bookId, cfi, progress)
+            }
+            return
+          }
+        } catch (error) {
+          console.log('Locations API hatası, spine tabanlı hesaplamaya geçiliyor:', error)
+        }
+      }
+      
+      // Locations API çalışmazsa spine tabanlı hesaplama
+      if (book && book.spine && book.spine.items) {
+        const spineItems = book.spine.items
+        
+        // CFI'den spine index'i çıkar
+        let currentIndex = -1
+        
+        if (cfi.includes('epubcfi')) {
+          // Farklı CFI formatlarını dene
+          const patterns = [
+            /epubcfi\(\/6\/(\d+)/,  // Standart format
+            /epubcfi\(\/(\d+)/,     // Alternatif format
+            /\/6\/(\d+)/,           // Basitleştirilmiş
+          ]
+          
+          for (const pattern of patterns) {
+            const match = cfi.match(pattern)
+            if (match && match[1]) {
+              let spineIndex = parseInt(match[1])
+              if (pattern === patterns[0]) { // Standart format için /2
+                spineIndex = Math.floor(spineIndex / 2)
+              }
+              if (!isNaN(spineIndex) && spineIndex >= 0 && spineIndex < spineItems.length) {
+                currentIndex = spineIndex
+                break
+              }
+            }
+          }
+        }
+        
+        // Eğer CFI'den çıkarılamadıysa, spine.get ile dene
+        if (currentIndex === -1) {
+          const currentSection = book.spine.get(cfi)
+          if (currentSection) {
+            currentIndex = spineItems.findIndex((item: any) => item.href === currentSection.href)
+          }
+        }
+        
+        if (currentIndex >= 0 && currentIndex < spineItems.length) {
+          // Spine tabanlı ilerleme hesaplama
+          const baseProgress = (currentIndex / spineItems.length) * 100
+          
+          // Spine içindeki konuma göre ek düzeltme
+          let adjustedProgress = baseProgress
+          
+          // Eğer locations mevcutsa, daha hassas hesaplama yap
+          if (book.locations && book.locations.length()) {
+            try {
+              const totalLocations = book.locations.length()
+              const currentLocation = book.locations.locationFromCfi(cfi)
+              if (currentLocation && currentLocation.start) {
+                const locationIndex = currentLocation.start.index
+                if (locationIndex >= 0) {
+                  adjustedProgress = (locationIndex / totalLocations) * 100
+                }
+              }
+            } catch (error) {
+              console.log('Location tabanlı hesaplama hatası:', error)
+            }
+          }
+          
+          progress = Math.round(adjustedProgress)
+          setProgressPercentage(progress)
+          
+          if (userId && bookId) {
+            saveReadingProgress(userId, bookId, cfi, progress)
+          }
+          return
+        }
+      }
+      
+      // Hiçbiri çalışmazsa varsayılan
+      setProgressPercentage(0)
+      if (userId && bookId) {
+        saveReadingProgress(userId, bookId, cfi, 0)
+      }
+      
+    } catch (error) {
+      console.warn('İlerleme hesaplama hatası:', error)
+      setProgressPercentage(0)
+      if (userId && bookId) {
+        saveReadingProgress(userId, bookId, cfi, 0)
+      }
+    }
+  }
 
   // Mevcut konumun bookmark olup olmadığını kontrol et
   const checkCurrentBookmark = (cfi: string) => {
@@ -84,81 +310,169 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   }
 
   const onReaderReady = useCallback((rendition: any) => {
+    console.log('=== READER READY ===')
     console.log('EPUB Reader hazır:', rendition)
+    console.log('Rendition object:', rendition)
+    console.log('Mevcut readerTheme:', readerTheme)
+    console.log('Mevcut isDarkMode:', isDarkMode)
+    
     renditionRef.current = rendition
     setIsLoading(false)
     setError(null)
     
-    // Tema ayarları
+    // Gelişmiş tema ayarları - KAPSAMLI
     rendition.themes.register('light', {
       body: { 
-        color: '#000',
-        background: '#fff',
-        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        color: '#1f2937',
+        background: '#ffffff',
+        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        'line-height': '1.6',
+        'padding': '20px',
+        'margin': '0',
+        'min-height': '100vh'
+      },
+      'p, div, span, section, article': {
+        color: '#1f2937',
+        'background-color': 'transparent'
+      },
+      'h1, h2, h3, h4, h5, h6': {
+        color: '#111827',
+        'background-color': 'transparent'
+      },
+      'html, body': {
+        'background-color': '#ffffff',
+        color: '#1f2937'
       }
     })
-    
+
     rendition.themes.register('dark', {
       body: { 
-        color: '#fff',
-        background: '#1a1a1a',
-        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-      }
-    })
-    
-    rendition.themes.register('sepia', {
-      body: { 
-        color: '#5c4b37',
-        background: '#f4f1ea',
-        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        color: '#e5e7eb',
+        background: '#0f172a',
+        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        'line-height': '1.6',
+        'padding': '20px',
+        'margin': '0',
+        'min-height': '100vh'
+      },
+      'p, div, span, section, article': {
+        color: '#e5e7eb',
+        'background-color': 'transparent'
+      },
+      'h1, h2, h3, h4, h5, h6': {
+        color: '#f9fafb',
+        'background-color': 'transparent'
+      },
+      'html, body': {
+        'background-color': '#0f172a',
+        color: '#e5e7eb'
       }
     })
 
-    // Varsayılan temayı uygula
-    rendition.themes.select(readerTheme)
+    // Mevcut dark mode durumuna göre tema uygula
+    const currentTheme = isDarkMode ? 'dark' : 'light'
+    console.log('Uygulanacak tema:', currentTheme)
+    rendition.themes.select(currentTheme)
+    setReaderTheme(currentTheme)
+    
+    // Font boyutunu uygula
     rendition.themes.fontSize(`${fontSize}%`)
+    
+    // Yükseklik ayarlaması
+    setTimeout(() => {
+      const iframes = document.querySelectorAll('.react-reader-container iframe')
+      iframes.forEach((iframe: any) => {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+          if (iframeDoc && iframeDoc.body) {
+            if (isFullscreen) {
+              iframeDoc.body.style.height = '100vh'
+              iframeDoc.body.style.maxHeight = '100vh'
+            } else {
+              iframeDoc.body.style.height = 'calc(100vh - 140px)'
+              iframeDoc.body.style.maxHeight = 'calc(100vh - 140px)'
+            }
+            iframeDoc.body.style.overflow = 'auto'
+          }
+        } catch (error) {
+          console.log('iframe yükseklik ayarlama hatası:', error)
+        }
+      })
+    }, 100)
+    
+    // Kitap bilgilerini ve TOC'u al
+    if (rendition.book) {
+      // TOC bilgilerini al
+      rendition.book.loaded.navigation.then((navigation: any) => {
+        if (navigation && navigation.toc) {
+          setToc(navigation.toc)
+          console.log('TOC yüklendi:', navigation.toc)
+        }
+      }).catch((error: any) => {
+        console.warn('TOC yüklenirken hata:', error)
+      })
+
+      // Locations'ı oluştur (ilerleme hesaplama için)
+      rendition.book.ready.then(() => {
+        return rendition.book.locations.generate(1024) // 1024 karakterde bir konum oluştur
+      }).then(() => {
+        console.log('Locations oluşturuldu')
+      }).catch((error: any) => {
+        console.warn('Locations oluşturulurken hata:', error)
+      })
+    }
+    
+    console.log('=== READER READY TAMAMLANDI ===')
   }, [readerTheme, fontSize])
 
-  // URL kontrolü ve CORS proxy
+  // Debug için blobUrl değişikliklerini izle
   useEffect(() => {
-    if (!bookUrl || bookUrl === 'demo-placeholder.epub') {
-      setError('Geçersiz kitap dosyası URL\'si')
-      setIsLoading(false)
-    }
-  }, [bookUrl])
-
-
+    console.log('EpubReader debug - blobUrl:', blobUrl, 'isLoading:', isLoading, 'error:', error)
+  }, [blobUrl, isLoading, error])
 
   // Dosyayı blob olarak indir
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
-
   useEffect(() => {
     const downloadFile = async () => {
       try {
-        console.log('Dosya indiriliyor:', bookUrl)
+        console.log('=== DOSYA İNDİRME BAŞLADI ===')
+        console.log('bookUrl:', bookUrl)
+        console.log('bookTitle:', bookTitle)
+        
         const response = await fetch(bookUrl)
+        console.log('Fetch response status:', response.status)
+        console.log('Fetch response ok:', response.ok)
         
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
         
         const blob = await response.blob()
+        console.log('Blob size:', blob.size, 'bytes')
+        console.log('Blob type:', blob.type)
+        
         const url = URL.createObjectURL(blob)
         console.log('Blob URL oluşturuldu:', url)
+        
         setBlobUrl(url)
-        setIsLoading(false)
+        setIsLoading(false) // Blob URL oluşturulduğunda loading'i false yap
+        console.log('=== DOSYA İNDİRME TAMAMLANDI ===')
       } catch (error) {
+        console.error('=== DOSYA İNDİRME HATASI ===')
         console.error('Dosya indirme hatası:', error)
-        setError(`Dosya indirilemedi: ${error instanceof Error ? error.message : 'Bilinmeyen hata'}`)
+        setError('Kitap dosyası indirilemedi. Lütfen tekrar deneyin.')
         setIsLoading(false)
       }
     }
 
     if (bookUrl && bookUrl !== 'demo-placeholder.epub') {
+      console.log('Dosya indirme başlatılıyor...')
       downloadFile()
+    } else {
+      console.log('Geçersiz bookUrl:', bookUrl)
+      setError('Geçersiz kitap URL\'si')
+      setIsLoading(false)
     }
 
-    // Cleanup
     return () => {
       if (blobUrl) {
         URL.revokeObjectURL(blobUrl)
@@ -166,38 +480,38 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
   }, [bookUrl])
 
-  // Okuma ilerlemesi ve bookmark'ları yükle
+  // Kullanıcı verilerini yükle (ilerleme ve bookmark'lar)
   useEffect(() => {
     const loadUserData = async () => {
-      if (!userId || !bookId) return
+      if (userId && bookId && blobUrl) {
+        try {
+          // İlerleme verilerini yükle
+          const progress = await getReadingProgress(userId, bookId)
+          if (progress) {
+            setProgressPercentage(progress.progress_percentage)
+            // İlerleme konumuna git
+            if (renditionRef.current && progress.current_location) {
+              renditionRef.current.display(progress.current_location)
+            }
+          } else {
+            // Henüz ilerleme yok, varsayılan değerlerle başla
+            setProgressPercentage(0)
+            console.log('Yeni okuma başlatılıyor')
+          }
 
-      try {
-        // Okuma ilerlemesini yükle (hata durumunda sessizce geç)
-        const progress = await getReadingProgress(userId, bookId)
-        if (progress) {
-          console.log('Önceki okuma ilerlemesi yüklendi:', progress)
-          setLocation(progress.current_location)
-          setProgressPercentage(progress.progress_percentage)
+          // Bookmark'ları yükle
+          const userBookmarks = await getBookmarks(userId, bookId)
+          setBookmarks(userBookmarks || [])
+        } catch (error) {
+          console.warn('Kullanıcı verileri yüklenirken hata:', error)
+          // Hata durumunda varsayılan değerlerle devam et
+          setProgressPercentage(0)
+          setBookmarks([])
         }
-
-        // Bookmark'ları yükle (hata durumunda sessizce geç)
-        const userBookmarks = await getBookmarks(userId, bookId)
-        if (userBookmarks.length > 0) {
-          console.log('Bookmark\'lar yüklendi:', userBookmarks.length)
-        }
-        setBookmarks(userBookmarks)
-      } catch (error) {
-        console.warn('Kullanıcı verileri yükleme hatası (normal):', error)
-        // Hata durumunda varsayılan değerlerle devam et
-        setBookmarks([])
-        setProgressPercentage(0)
       }
     }
 
-    // Sadece blobUrl hazır olduğunda kullanıcı verilerini yükle
-    if (blobUrl) {
-      loadUserData()
-    }
+    loadUserData()
   }, [userId, bookId, blobUrl])
 
   const goToNext = () => {
@@ -213,9 +527,71 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   }
 
   const changeTheme = (theme: string) => {
+    console.log('=== CHANGE THEME ===')
+    console.log('Current theme:', readerTheme)
+    console.log('New theme:', theme)
+    console.log('Rendition ref:', !!renditionRef.current)
+    console.log('isDarkMode:', isDarkMode)
+    
     setReaderTheme(theme)
     if (renditionRef.current) {
+      console.log('Applying theme to rendition...')
       renditionRef.current.themes.select(theme)
+      console.log('Theme applied successfully')
+      
+      // iframe'leri doğrudan manipüle et
+      setTimeout(() => {
+        const iframes = document.querySelectorAll('.react-reader-container iframe')
+        iframes.forEach((iframe: any) => {
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+            if (iframeDoc) {
+              if (theme === 'dark') {
+                iframeDoc.body.style.backgroundColor = '#0f172a'
+                iframeDoc.body.style.color = '#e5e7eb'
+                iframeDoc.documentElement.style.backgroundColor = '#0f172a'
+                iframeDoc.documentElement.style.color = '#e5e7eb'
+                
+                // Tüm elementleri koyu yap
+                const allElements = iframeDoc.querySelectorAll('*')
+                allElements.forEach((el: any) => {
+                  if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
+                    el.style.backgroundColor = 'transparent'
+                    el.style.color = '#e5e7eb'
+                  }
+                })
+              } else {
+                iframeDoc.body.style.backgroundColor = '#ffffff'
+                iframeDoc.body.style.color = '#1f2937'
+                iframeDoc.documentElement.style.backgroundColor = '#ffffff'
+                iframeDoc.documentElement.style.color = '#1f2937'
+                
+                // Tüm elementleri açık yap
+                const allElements = iframeDoc.querySelectorAll('*')
+                allElements.forEach((el: any) => {
+                  if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
+                    el.style.backgroundColor = 'transparent'
+                    el.style.color = '#1f2937'
+                  }
+                })
+              }
+            }
+          } catch (error) {
+            console.log('iframe manipülasyon hatası:', error)
+          }
+        })
+      }, 100)
+      
+      // Tema değişikliğini global dark mode ile senkronize et
+      if (theme === 'dark' && !isDarkMode && toggleDarkMode) {
+        console.log('Global dark mode aktifleştiriliyor...')
+        toggleDarkMode()
+      } else if (theme === 'light' && isDarkMode && toggleDarkMode) {
+        console.log('Global dark mode deaktifleştiriliyor...')
+        toggleDarkMode()
+      }
+    } else {
+      console.log('Rendition ref not available')
     }
   }
 
@@ -227,40 +603,64 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   }
 
   const resetReader = () => {
-    setLocation(0)
-    setFontSize(100)
-    setReaderTheme('light')
     if (renditionRef.current) {
-      renditionRef.current.display(0)
-      renditionRef.current.themes.select('light')
-      renditionRef.current.themes.fontSize('100%')
+      renditionRef.current.display()
+      setProgressPercentage(0)
     }
   }
 
-  // Bookmark ekle/sil
   const toggleBookmark = async () => {
-    if (!userId || !bookId || !location) return
+    if (!userId || !bookId) return
 
     try {
       if (isBookmarked) {
-        // Bookmark'ı sil
-        const bookmark = bookmarks.find(b => b.location === location)
-        if (bookmark) {
-          const success = await deleteBookmark(bookmark.id)
-          if (success) {
-            setBookmarks(bookmarks.filter(b => b.id !== bookmark.id))
-            setIsBookmarked(false)
-          }
+        // Mevcut bookmark'ı sil
+        const currentBookmark = bookmarks.find(b => b.location === location)
+        if (currentBookmark) {
+          await deleteBookmark(currentBookmark.id)
+          setBookmarks(bookmarks.filter(b => b.id !== currentBookmark.id))
+          setIsBookmarked(false)
         }
       } else {
-        // Bookmark ekle
-        const bookmarkId = await addBookmark(userId, bookId, location.toString())
+        // Yeni bookmark ekle
+        const chapterTitleForBookmark = currentChapter || ''
+        
+        // Mevcut sayfa ve ilerleme bilgilerini hesapla
+        let bookmarkNote = ''
+        
+        // Mevcut sayfa bilgilerini kullan
+        if (currentPage > 0 && totalPages > 0) {
+          bookmarkNote = `Sayfa ${currentPage}/${totalPages}`
+        } else if (currentChapter) {
+          bookmarkNote = currentChapter
+        } else {
+          bookmarkNote = 'Yer İşareti'
+        }
+        
+        // Locations API ile yüzde hesaplamayı dene
+        if (renditionRef.current?.book?.locations) {
+          try {
+            const percentage = renditionRef.current.book.locations.percentageFromCfi(location as string)
+            if (typeof percentage === 'number' && !isNaN(percentage)) {
+              const percentageRounded = Math.round(percentage * 100)
+              bookmarkNote += ` (%${percentageRounded})`
+            }
+          } catch (error) {
+            console.log('Yüzde hesaplama hatası:', error)
+          }
+        }
+        
+
+        
+        const bookmarkId = await addBookmark(userId, bookId, location as string, bookmarkNote, chapterTitleForBookmark)
         if (bookmarkId) {
           const newBookmark: BookmarkType = {
             id: bookmarkId,
             user_id: userId,
             book_id: bookId,
-            location: location.toString(),
+            location: location as string,
+            note: bookmarkNote,
+            chapter_title: chapterTitleForBookmark,
             created_at: new Date().toISOString()
           }
           setBookmarks([...bookmarks, newBookmark])
@@ -272,7 +672,105 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
   }
 
-  // Bookmark'a git
+  // Yer işareti için detaylı konum bilgisi oluştur
+  const getBookmarkLocationInfo = (bookmark: BookmarkType): { title: string; details: string } => {
+    // Eğer kaydedilmiş sayfa bilgisi varsa ve geçerliyse onu kullan
+    if (bookmark.note && bookmark.note.trim() !== '' && bookmark.note !== 'undefined') {
+      return {
+        title: bookmark.chapter_title || 'Yer İşareti',
+        details: bookmark.note
+      }
+    }
+    
+    // Eğer chapter_title varsa onu kullan
+    if (bookmark.chapter_title && bookmark.chapter_title.trim() !== '') {
+      const details: string[] = []
+      
+      // Ek bilgileri hesapla
+      if (bookmark.location && renditionRef.current?.book?.locations) {
+        try {
+          const percentage = renditionRef.current.book.locations.percentageFromCfi(bookmark.location)
+          if (typeof percentage === 'number' && !isNaN(percentage)) {
+            const percentageRounded = Math.round(percentage * 100)
+            details.push(`%${percentageRounded}`)
+            
+            if (totalPages > 0) {
+              const estimatedPage = Math.max(1, Math.min(totalPages, Math.round(percentage * totalPages)))
+              details.push(`Sayfa ${estimatedPage}/${totalPages}`)
+            }
+          }
+        } catch (error) {
+          console.log('Percentage hesaplama hatası:', error)
+        }
+      }
+      
+      return {
+        title: bookmark.chapter_title,
+        details: details.join(' • ')
+      }
+    }
+
+    // CFI'den konum bilgisi çıkar
+    if (bookmark.location) {
+      try {
+        const details: string[] = []
+        let title = 'Yer İşareti'
+        
+        
+
+        // Sayfa ve yüzde bilgisi
+        if (renditionRef.current?.book?.locations) {
+          try {
+            const percentage = renditionRef.current.book.locations.percentageFromCfi(bookmark.location)
+            if (typeof percentage === 'number' && !isNaN(percentage)) {
+              const percentageRounded = Math.round(percentage * 100)
+              details.push(`%${percentageRounded}`)
+              
+              if (totalPages > 0) {
+                const estimatedPage = Math.max(1, Math.min(totalPages, Math.round(percentage * totalPages)))
+                details.push(`Sayfa ${estimatedPage}/${totalPages}`)
+              }
+            }
+          } catch (error) {
+            console.log('Percentage hesaplama hatası:', error)
+          }
+        }
+
+        // Element/paragraf bilgisi
+        const elementPatterns = [
+          /\[(\d+)\]/,              // [123] format
+          /!(\d+)/,                 // !123 format
+          /:(\d+)/,                 // :123 format
+        ]
+        
+        for (const pattern of elementPatterns) {
+          const match = bookmark.location.match(pattern)
+          if (match && match[1]) {
+            const elementNum = parseInt(match[1])
+            if (!isNaN(elementNum) && elementNum > 0) {
+              details.push(`Paragraf ${elementNum}`)
+              break
+            }
+          }
+        }
+
+        return {
+          title,
+          details: details.join(' • ')
+        }
+      } catch (error) {
+        console.log('CFI parse hatası:', error)
+      }
+    }
+
+    // Varsayılan bilgi
+    const bookmarkIndex = bookmarks.findIndex(b => b.id === bookmark.id)
+    return {
+      title: `Yer İşareti ${bookmarkIndex + 1}`,
+      details: ''
+    }
+  }
+
   const goToBookmark = (bookmark: BookmarkType) => {
     if (renditionRef.current) {
       renditionRef.current.display(bookmark.location)
@@ -280,85 +778,160 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
   }
 
-  // Debug: URL'yi konsola yazdır
-  console.log('EPUB URL:', bookUrl)
-  console.log('Kitap başlığı:', bookTitle)
+  const deleteBookmarkItem = async (bookmark: BookmarkType, event: React.MouseEvent) => {
+    event.stopPropagation() // Tıklama olayının yayılmasını engelle
+    
+    try {
+      await deleteBookmark(bookmark.id)
+      setBookmarks(bookmarks.filter(b => b.id !== bookmark.id))
+      
+      // Eğer silinen bookmark mevcut konumda ise bookmark durumunu güncelle
+      if (bookmark.location === location) {
+        setIsBookmarked(false)
+      }
+    } catch (error) {
+      console.error('Yer işareti silme hatası:', error)
+    }
+  }
 
-  if (error) {
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen)
+  }
+
+  // Tam ekran değişikliklerini dinle ve yüksekliği güncelle
+  useEffect(() => {
+    const updateHeight = () => {
+      const iframes = document.querySelectorAll('.react-reader-container iframe')
+      iframes.forEach((iframe: any) => {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+          if (iframeDoc && iframeDoc.body) {
+            if (isFullscreen) {
+              iframeDoc.body.style.height = '100vh'
+              iframeDoc.body.style.maxHeight = '100vh'
+            } else {
+              iframeDoc.body.style.height = 'calc(100vh - 140px)'
+              iframeDoc.body.style.maxHeight = 'calc(100vh - 140px)'
+            }
+            iframeDoc.body.style.overflow = 'auto'
+          }
+        } catch (error) {
+          console.log('iframe yükseklik ayarlama hatası:', error)
+        }
+      })
+    }
+
+    // Kısa bir gecikme ile yüksekliği güncelle
+    setTimeout(updateHeight, 100)
+  }, [isFullscreen])
+
+  // Window resize olayını dinle ve yüksekliği güncelle
+  useEffect(() => {
+    const handleResize = () => {
+      setTimeout(() => {
+        const iframes = document.querySelectorAll('.react-reader-container iframe')
+        iframes.forEach((iframe: any) => {
+          try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+            if (iframeDoc && iframeDoc.body) {
+              if (isFullscreen) {
+                iframeDoc.body.style.height = '100vh'
+                iframeDoc.body.style.maxHeight = '100vh'
+              } else {
+                iframeDoc.body.style.height = 'calc(100vh - 140px)'
+                iframeDoc.body.style.maxHeight = 'calc(100vh - 140px)'
+              }
+              iframeDoc.body.style.overflow = 'auto'
+            }
+          } catch (error) {
+            console.log('resize iframe yükseklik ayarlama hatası:', error)
+          }
+        })
+      }, 100)
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isFullscreen])
+
+  const epubInitOptions = {
+    openAs: 'epub',
+    flow: 'paginated',
+    manager: 'continuous'
+  }
+
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
-        <div className="text-center max-w-md mx-auto p-6">
-          <div className="relative mb-8">
-            <div className="w-20 h-20 bg-gradient-to-r from-red-500 to-pink-500 rounded-3xl flex items-center justify-center mx-auto shadow-2xl">
-              <BookOpen className="w-10 h-10 text-white" />
-            </div>
-            <div className="absolute -top-2 -right-2 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center">
-              <div className="w-4 h-4 text-white font-bold">!</div>
+      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
+        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={onBackToLibrary}
+                  className="p-2 rounded-xl bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border border-white/30 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{bookTitle}</h1>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Yükleniyor...</p>
+                </div>
+              </div>
             </div>
           </div>
-          
-          <div className="bg-white/80 backdrop-blur-xl rounded-2xl p-6 border border-white/30 shadow-xl">
-            <h3 className="text-xl font-bold text-red-600 mb-2">
-              Kitap Yüklenemedi
-            </h3>
-            <p className="text-gray-600 mb-4">{bookTitle}</p>
-            
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-              <p className="text-sm text-red-700 font-medium mb-2">Hata Detayı:</p>
-              <p className="text-xs text-red-600">{error}</p>
+        </div>
+        
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
+              <BookOpen className="w-8 h-8 text-white animate-pulse" />
             </div>
-            
-            <div className="space-y-2 mb-6 text-xs text-gray-500">
-              <p><strong>Kitap:</strong> {bookTitle}</p>
-              <p className="break-all"><strong>URL:</strong> {bookUrl}</p>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">Kitap Yükleniyor</h2>
+            <p className="text-gray-600 dark:text-gray-400">Lütfen bekleyin...</p>
+            <div className="mt-6 w-64 h-2 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-full animate-pulse"></div>
             </div>
-            
-            <button
-              onClick={onBackToLibrary}
-              className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
-            >
-              Kütüphaneye Dön
-            </button>
           </div>
         </div>
       </div>
     )
   }
 
-  if (isLoading) {
+  if (error) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
-        <div className="text-center">
-          <div className="relative mb-8">
-            <div className="w-20 h-20 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl">
-              <BookOpen className="w-10 h-10 text-white animate-pulse" />
-            </div>
-            <div className="absolute -top-2 -right-2 w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center animate-bounce">
-              <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
+      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
+        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={onBackToLibrary}
+                  className="p-2 rounded-xl bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border border-white/30 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <div>
+                  <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{bookTitle}</h1>
+                  <p className="text-sm text-red-600 dark:text-red-400">Hata</p>
+                </div>
+              </div>
             </div>
           </div>
-          
-          <div className="bg-white/80 backdrop-blur-xl rounded-2xl p-6 border border-white/30 shadow-xl max-w-md mx-auto">
-            <h3 className="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent mb-2">
-              Kitap Hazırlanıyor
-            </h3>
-            <p className="text-gray-600 mb-4">{bookTitle}</p>
-            
-            <div className="space-y-3 mb-6">
-              <div className="flex items-center gap-3 text-sm text-gray-500">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                <span>EPUB dosyası indiriliyor...</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full animate-pulse"></div>
-              </div>
+        </div>
+        
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto p-8">
+            <div className="w-16 h-16 bg-gradient-to-r from-red-600 to-red-500 dark:from-red-500 dark:to-red-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
+              <AlertTriangle className="w-8 h-8 text-white" />
             </div>
-            
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">Yükleme Hatası</h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
             <button
-              onClick={onBackToLibrary}
-              className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors border border-gray-200 hover:border-gray-300"
+              onClick={() => window.location.reload()}
+              className="px-6 py-3 bg-blue-600 dark:bg-blue-500 text-white rounded-xl hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors shadow-lg"
             >
-              İptal Et
+              Tekrar Dene
             </button>
           </div>
         </div>
@@ -367,194 +940,214 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
-      {/* Modern Reader Header */}
-      <div className="bg-white/90 backdrop-blur-xl border-b border-white/30 shadow-lg z-20 sticky top-0">
-        <div className="flex items-center justify-between p-4">
-          {/* Left Section - Back & Title */}
-          <div className="flex items-center gap-4">
-            <button
-              onClick={onBackToLibrary}
-              className="group flex items-center gap-2 px-4 py-2 bg-white/80 hover:bg-white border border-white/50 hover:border-blue-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
-            >
-              <Home className="w-4 h-4 text-gray-600 group-hover:text-blue-600 transition-colors" />
-              <span className="hidden sm:inline text-sm font-medium text-gray-700 group-hover:text-blue-600">Kütüphane</span>
-            </button>
-            
-            <div className="hidden md:block">
-              <h1 className="text-lg font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent truncate max-w-md">
-                {bookTitle}
-              </h1>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                <span className="text-xs text-gray-500">Aktif okuma</span>
+    <div className={`h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${
+      isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
+    }`}>
+      {/* Modern Reader Header - Kompakt */}
+      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ${
+        isFullscreen ? 'hidden' : ''
+      }`}>
+        <div className="max-w-7xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <button
+                onClick={onBackToLibrary}
+                className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex-shrink-0 flex items-center justify-center"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate">{bookTitle}</h1>
+                <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                  <span>%{progressPercentage}</span>
+                  {totalPages > 0 && (
+                    <>
+                      <span>•</span>
+                      <span>{currentPage}/{totalPages}</span>
+                    </>
+                  )}
+                  {currentChapter && (
+                    <>
+                      <span>•</span>
+                      <span className="truncate max-w-32">{currentChapter}</span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Right Section - Controls */}
-          <div className="flex items-center gap-2">
-            {/* Reading Progress Badge */}
-            <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-white/80 border border-white/50 rounded-xl shadow-sm">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span className="text-xs font-medium text-gray-700">{progressPercentage}%</span>
-            </div>
-
-            {/* Bookmark Toggle */}
-            <button
-              onClick={toggleBookmark}
-              className={`group p-2.5 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md ${
-                isBookmarked 
-                  ? 'bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100' 
-                  : 'bg-white/80 border border-white/50 text-gray-600 hover:bg-white hover:text-blue-600'
-              }`}
-              title={isBookmarked ? "Yer işaretini kaldır" : "Yer işareti ekle"}
-            >
-              {isBookmarked ? (
-                <BookmarkCheck className="w-5 h-5 transform group-hover:scale-110 transition-transform" />
-              ) : (
-                <Bookmark className="w-5 h-5 transform group-hover:scale-110 transition-transform" />
-              )}
-            </button>
-
-            {/* Bookmarks List */}
-            <button
-              onClick={() => setShowBookmarks(!showBookmarks)}
-              className="group relative p-2.5 bg-white/80 border border-white/50 rounded-xl shadow-sm hover:shadow-md hover:bg-white transition-all duration-200"
-              title="Yer işaretleri"
-            >
-              <MoreVertical className="w-5 h-5 text-gray-600 group-hover:text-blue-600 transition-colors" />
-              {bookmarks.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center shadow-lg animate-pulse">
-                  {bookmarks.length}
-                </span>
-              )}
-            </button>
-
-            {/* Reset Reader */}
-            <button
-              onClick={resetReader}
-              className="group p-2.5 bg-white/80 border border-white/50 rounded-xl shadow-sm hover:shadow-md hover:bg-white transition-all duration-200 hidden sm:block"
-              title="Başa dön"
-            >
-              <RotateCcw className="w-5 h-5 text-gray-600 group-hover:text-orange-600 group-hover:rotate-180 transition-all duration-300" />
-            </button>
-
-            {/* Settings */}
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="group p-2.5 bg-white/80 border border-white/50 rounded-xl shadow-sm hover:shadow-md hover:bg-white transition-all duration-200"
-              title="Ayarlar"
-            >
-              <Settings className="w-5 h-5 text-gray-600 group-hover:text-purple-600 group-hover:rotate-90 transition-all duration-300" />
-            </button>
-          </div>
-        </div>
-
-        {/* Enhanced Progress Bar */}
-        <div className="px-4 pb-3">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-xs font-medium text-gray-600">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span>{progressPercentage}%</span>
-            </div>
             
-            <div className="flex-1 relative">
-              <div className="h-2 bg-gray-200/80 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full transition-all duration-500 ease-out shadow-sm"
-                  style={{ width: `${progressPercentage}%` }}
-                />
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Progress Bar - Desktop */}
+              <div className="hidden lg:flex items-center gap-2">
+                <div className="w-24 h-1.5 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-full transition-all duration-300"
+                    style={{ width: `${progressPercentage}%` }}
+                  ></div>
+                </div>
               </div>
-              <div 
-                className="absolute top-0 h-2 w-8 bg-gradient-to-r from-transparent via-white/50 to-transparent rounded-full animate-pulse"
-                style={{ left: `${Math.max(0, progressPercentage - 8)}%` }}
-              />
-            </div>
-            
-            <div className="flex items-center gap-2 text-xs text-gray-500">
-              <Bookmark className="w-3 h-3" />
-              <span className="hidden sm:inline">{bookmarks.length} yer işareti</span>
-              <span className="sm:hidden">{bookmarks.length}</span>
+
+              {/* Dark Mode Toggle */}
+              {toggleDarkMode && (
+                <button
+                  onClick={toggleDarkMode}
+                  className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
+                  title={isDarkMode ? 'Açık moda geç' : 'Koyu moda geç'}
+                >
+                  {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
+              )}
+
+              {/* Quick Bookmark Button */}
+                             <button
+                 onClick={toggleBookmark}
+                 className={`p-1.5 rounded-lg backdrop-blur-sm border shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center ${
+                   isBookmarked 
+                     ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400' 
+                     : 'bg-white dark:bg-dark-800/80 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400'
+                 }`}
+                 title={isBookmarked ? 'Yer işaretini kaldır' : 'Yer işareti ekle'}
+               >
+                {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+              </button>
+
+              {/* Menu Button */}
+              <div className="relative menu-container">
+                <button
+                  onClick={() => setShowMenu(!showMenu)}
+                  className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
+                  title="Menü"
+                >
+                  {showMenu ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+                </button>
+
+                {/* Dropdown Menu */}
+                {showMenu && (
+                  <div className="absolute right-0 top-full mt-2 w-56 bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border border-white/30 dark:border-dark-700/30 rounded-xl shadow-xl z-30">
+                    <div className="p-2">
+                                             <button
+                         onClick={() => {
+                           setShowSettings(!showSettings)
+                           setShowMenu(false)
+                         }}
+                         className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                       >
+                        <Settings className="w-4 h-4" />
+                        <span>Okuma Ayarları</span>
+                      </button>
+                      
+                                             <button
+                         onClick={() => {
+                           setShowBookmarks(!showBookmarks)
+                           setShowMenu(false)
+                         }}
+                         className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                       >
+                        <Bookmark className="w-4 h-4" />
+                        <span>Yer İşaretleri ({bookmarks.length})</span>
+                      </button>
+                      
+                      <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
+                      
+                      <div className="md:hidden">
+                                                 <button
+                           onClick={() => {
+                             toggleFullscreen()
+                             setShowMenu(false)
+                           }}
+                           className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                         >
+                          <Maximize className="w-4 h-4" />
+                          <span>Tam Ekran</span>
+                        </button>
+                      </div>
+                      
+                                             <button
+                         onClick={() => {
+                           resetReader()
+                           setShowMenu(false)
+                         }}
+                         className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                       >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Baştan Başla</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Modern Bookmark Panel */}
-      {showBookmarks && (
-        <div className="bg-white/95 backdrop-blur-xl border-b border-white/30 shadow-xl z-30 max-h-80 overflow-y-auto">
-          <div className="p-6">
+      {showBookmarks && !isFullscreen && (
+        <div className="bookmark-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
+          <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center">
-                  <Bookmark className="w-4 h-4 text-white" />
-                </div>
-                <h3 className="text-lg font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
-                  Yer İşaretleri
-                </h3>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Yer İşaretleri</h3>
+                <span className="text-sm text-gray-600 dark:text-gray-400">({bookmarks.length})</span>
               </div>
               <button
                 onClick={() => setShowBookmarks(false)}
-                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+                className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
+                title="Kapat"
               >
-                <div className="w-5 h-5 text-gray-400 hover:text-gray-600 font-bold">×</div>
+                <X className="w-4 h-4" />
               </button>
             </div>
             
             {bookmarks.length === 0 ? (
               <div className="text-center py-8">
-                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <Bookmark className="w-8 h-8 text-gray-400" />
-                </div>
-                <p className="text-gray-500 font-medium">Henüz yer işareti eklenmemiş</p>
-                <p className="text-xs text-gray-400 mt-1">Önemli sayfaları işaretleyerek hızlıca erişebilirsiniz</p>
+                <Bookmark className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
+                <p className="text-gray-600 dark:text-gray-400">Henüz yer işareti eklenmemiş</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {bookmarks.map((bookmark, index) => (
-                  <div
-                    key={bookmark.id}
-                    className="group flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 rounded-2xl cursor-pointer transition-all duration-200 border border-blue-100 hover:border-blue-200 shadow-sm hover:shadow-md"
-                    onClick={() => goToBookmark(bookmark)}
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center shadow-sm">
-                          <span className="text-white text-xs font-bold">{index + 1}</span>
-                        </div>
-                        <div>
-                          <span className="text-sm font-semibold text-gray-900">Yer İşareti {index + 1}</span>
-                          <p className="text-xs text-gray-500 mt-0.5">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-48 overflow-y-auto">
+                {bookmarks.map((bookmark) => {
+                  const locationInfo = getBookmarkLocationInfo(bookmark)
+                  return (
+                    <div
+                      key={bookmark.id}
+                      onClick={() => goToBookmark(bookmark)}
+                      className="p-3 bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-xl border border-white/30 dark:border-dark-700/30 cursor-pointer hover:bg-white/80 dark:hover:bg-dark-700/80 transition-all duration-200 group"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                            {locationInfo.title}
+                          </p>
+                          {locationInfo.details && (
+                            <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">
+                              {locationInfo.details}
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-500 dark:text-gray-500">
                             {new Date(bookmark.created_at).toLocaleDateString('tr-TR', {
-                              day: 'numeric',
+                              year: 'numeric',
                               month: 'short',
+                              day: 'numeric',
                               hour: '2-digit',
                               minute: '2-digit'
                             })}
                           </p>
                         </div>
+                        <div className="flex items-center gap-2 ml-2">
+                          <BookmarkCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                          <button
+                            onClick={(e) => deleteBookmarkItem(bookmark, e)}
+                            className="p-1 rounded-lg bg-red-100 dark:bg-red-900/50 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50 transition-colors flex items-center justify-center"
+                            title="Yer işaretini sil"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        deleteBookmark(bookmark.id).then(success => {
-                          if (success) {
-                            setBookmarks(bookmarks.filter(b => b.id !== bookmark.id))
-                            if (bookmark.location === location) {
-                              setIsBookmarked(false)
-                            }
-                          }
-                        })
-                      }}
-                      className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100"
-                      title="Sil"
-                    >
-                      <div className="w-4 h-4 font-bold">×</div>
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -562,245 +1155,234 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       )}
 
       {/* Modern Settings Panel */}
-      {showSettings && (
-        <div className="bg-white/95 backdrop-blur-xl border-b border-white/30 shadow-xl z-30">
-          <div className="max-w-5xl mx-auto p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl flex items-center justify-center">
-                  <Settings className="w-4 h-4 text-white" />
-                </div>
-                <h3 className="text-lg font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
-                  Okuma Ayarları
-                </h3>
-              </div>
+      {showSettings && !isFullscreen && (
+        <div className="settings-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Okuma Ayarları</h3>
               <button
                 onClick={() => setShowSettings(false)}
-                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+                className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
+                title="Kapat"
               >
-                <div className="w-5 h-5 text-gray-400 hover:text-gray-600 font-bold">×</div>
+                <X className="w-4 h-4" />
               </button>
             </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Font Size Control */}
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-100">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-8 h-8 bg-blue-500 rounded-xl flex items-center justify-center">
-                    <span className="text-white text-sm font-bold">A</span>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">Font Boyutu</h4>
-                    <p className="text-xs text-gray-500">Mevcut: {fontSize}%</p>
-                  </div>
-                </div>
-                
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => changeFontSize(Math.max(fontSize - 10, 70))}
-                      className="w-10 h-10 bg-white border border-blue-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-all duration-200 flex items-center justify-center font-bold text-blue-600"
-                    >
-                      A-
-                    </button>
-                    <div className="flex-1 relative">
-                      <input
-                        type="range"
-                        min="70"
-                        max="150"
-                        step="10"
-                        value={fontSize}
-                        onChange={(e) => changeFontSize(parseInt(e.target.value))}
-                        className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer slider"
-                      />
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>70%</span>
-                        <span>150%</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => changeFontSize(Math.min(fontSize + 10, 150))}
-                      className="w-10 h-10 bg-white border border-blue-200 rounded-xl hover:bg-blue-50 hover:border-blue-300 transition-all duration-200 flex items-center justify-center font-bold text-blue-600"
-                    >
-                      A+
-                    </button>
-                  </div>
-                </div>
-              </div>
-
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Theme Selection */}
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-2xl border border-amber-100">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-8 h-8 bg-amber-500 rounded-xl flex items-center justify-center">
-                    <div className="w-4 h-4 rounded-full bg-white"></div>
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">Okuma Teması</h4>
-                    <p className="text-xs text-gray-500">Gözlerinizi koruyun</p>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => changeTheme('light')}
-                    className={`p-3 rounded-xl transition-all duration-200 border-2 ${
-                      readerTheme === 'light'
-                        ? 'bg-white border-blue-300 shadow-md'
-                        : 'bg-white border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="w-full h-8 bg-white rounded-lg border mb-2"></div>
-                    <span className="text-xs font-medium text-gray-700">Açık</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => changeTheme('sepia')}
-                    className={`p-3 rounded-xl transition-all duration-200 border-2 ${
-                      readerTheme === 'sepia'
-                        ? 'bg-amber-50 border-amber-300 shadow-md'
-                        : 'bg-amber-50 border-amber-200 hover:border-amber-300'
-                    }`}
-                  >
-                    <div className="w-full h-8 bg-amber-100 rounded-lg border border-amber-200 mb-2"></div>
-                    <span className="text-xs font-medium text-amber-700">Sepia</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => changeTheme('dark')}
-                    className={`p-3 rounded-xl transition-all duration-200 border-2 ${
-                      readerTheme === 'dark'
-                        ? 'bg-gray-800 border-gray-600 shadow-md'
-                        : 'bg-gray-100 border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="w-full h-8 bg-gray-800 rounded-lg mb-2"></div>
-                    <span className={`text-xs font-medium ${readerTheme === 'dark' ? 'text-white' : 'text-gray-700'}`}>Koyu</span>
-                  </button>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Tema</label>
+                <div className="flex gap-2">
+                                     {[
+                     { id: 'light', name: 'Açık', icon: '☀️' },
+                     { id: 'dark', name: 'Koyu', icon: '🌙' }
+                   ].map((theme) => (
+                     <button
+                       key={theme.id}
+                       onClick={() => {
+                         console.log('Theme button clicked:', theme.id)
+                         changeTheme(theme.id)
+                       }}
+                       className={`flex-1 py-3 px-4 rounded-xl border transition-all duration-200 ${
+                         readerTheme === theme.id
+                           ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                           : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
+                       }`}
+                     >
+                      <div className="text-center">
+                        <div className="text-lg mb-1">{theme.icon}</div>
+                        <div className="text-sm font-medium">{theme.name}</div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Navigation Controls */}
-              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 p-6 rounded-2xl border border-emerald-100">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-8 h-8 bg-emerald-500 rounded-xl flex items-center justify-center">
-                    <ChevronRight className="w-4 h-4 text-white" />
+              {/* Font Size */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  Font Boyutu: {fontSize}%
+                </label>
+                <div className="flex items-center gap-3">
+                                     <button
+                     onClick={() => changeFontSize(Math.max(50, fontSize - 10))}
+                     className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
+                   >
+                     A-
+                   </button>
+                  <div className="flex-1 h-2 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
+                    <input
+                      type="range"
+                      min="50"
+                      max="200"
+                      value={fontSize}
+                      onChange={(e) => changeFontSize(parseInt(e.target.value))}
+                      className="w-full h-full appearance-none bg-transparent cursor-pointer"
+                      style={{
+                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${fontSize}%, #e5e7eb ${fontSize}%, #e5e7eb 100%)`
+                      }}
+                    />
                   </div>
-                  <div>
-                    <h4 className="font-semibold text-gray-900">Navigasyon</h4>
-                    <p className="text-xs text-gray-500">Hızlı sayfa geçişi</p>
-                  </div>
-                </div>
-                
-                <div className="space-y-3">
-                  <button
-                    onClick={goToPrevious}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-emerald-200 rounded-xl hover:bg-emerald-50 hover:border-emerald-300 transition-all duration-200 text-emerald-700 font-medium"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                    Önceki Sayfa
-                  </button>
-                  <button
-                    onClick={goToNext}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all duration-200 font-medium shadow-lg hover:shadow-xl"
-                  >
-                    Sonraki Sayfa
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={resetReader}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 text-gray-600 hover:text-emerald-600 transition-colors text-sm"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    Başa Dön
-                  </button>
+                                     <button
+                     onClick={() => changeFontSize(Math.min(200, fontSize + 10))}
+                     className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
+                   >
+                     A+
+                   </button>
                 </div>
               </div>
+            </div>
+
+            {/* Bookmark Section */}
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Yer İşaretleri</label>
+              <div className="flex items-center gap-3">
+                                 <button
+                   onClick={toggleBookmark}
+                   className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${
+                     isBookmarked 
+                       ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400' 
+                       : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
+                   }`}
+                 >
+                  {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                  <span className="text-sm font-medium">
+                    {isBookmarked ? 'Yer İşaretini Kaldır' : 'Yer İşareti Ekle'}
+                  </span>
+                </button>
+                
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  {bookmarks.length} yer işareti
+                </span>
+              </div>
+            </div>
+
+            {/* Reset Button */}
+            <div className="mt-6">
+                             <button
+                 onClick={resetReader}
+                 className="flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
+               >
+                <RotateCcw className="w-4 h-4" />
+                Sıfırla
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Kitap Okuyucu */}
-      <div className="flex-1 relative">
+      {/* Book Reader - Improved Layout */}
+      <div className="flex-1 relative overflow-hidden">
         {blobUrl ? (
-          <ReactReader
-            url={blobUrl}
-            location={location}
-            locationChanged={locationChanged}
-            epubInitOptions={{
-              openAs: 'epub'
-            }}
-            getRendition={onReaderReady}
-            tocChanged={(toc: any) => {
-              tocRef.current = toc
-            }}
-            epubOptions={{
-              flow: 'paginated',
-              manager: 'default'
-            }}
-          />
+          <div className={`w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${
+            isFullscreen ? 'fullscreen' : ''
+          }`}>
+            <ReactReader
+              url={blobUrl}
+              location={location}
+              locationChanged={locationChanged}
+              getRendition={onReaderReady}
+              epubInitOptions={epubInitOptions}
+              tocChanged={(toc: any) => {
+                console.log('TOC değişti:', toc)
+                setToc(toc || [])
+                tocRef.current = toc
+              }}
+            />
+          </div>
         ) : (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <BookOpen className="w-12 h-12 animate-pulse mx-auto mb-4 text-blue-600" />
-              <p className="text-gray-600">EPUB dosyası hazırlanıyor...</p>
+              <BookOpen className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+              <p className="text-gray-600 dark:text-gray-400">
+                {isLoading ? 'Kitap yükleniyor...' : 'Kitap yüklenemedi'}
+              </p>
+              {error && (
+                <p className="text-red-500 text-sm mt-2">{error}</p>
+              )}
             </div>
           </div>
         )}
-        
-        {/* Mobil Navigasyon Butonları */}
-        <div className="md:hidden">
+
+        {/* Fullscreen Toggle Button - Top Right */}
+        <div className={`md:hidden fixed top-6 right-6 z-50 transition-all duration-300 ${
+          isFullscreen ? 'block' : 'hidden'
+        }`}>
           <button
-            onClick={goToPrevious}
-            className="mobile-nav-button absolute left-4 top-1/2 transform -translate-y-1/2 p-4 bg-white/90 backdrop-blur-sm rounded-full shadow-lg active:shadow-xl transition-all opacity-80 active:opacity-100 active:scale-95"
+            onClick={toggleFullscreen}
+            className="p-3 bg-black/20 backdrop-blur-sm rounded-full border border-white/30 shadow-lg hover:shadow-xl transition-all duration-200 text-white flex items-center justify-center"
           >
-            <ChevronLeft className="w-6 h-6 text-gray-700" />
-          </button>
-          
-          <button
-            onClick={goToNext}
-            className="mobile-nav-button absolute right-4 top-1/2 transform -translate-y-1/2 p-4 bg-white/90 backdrop-blur-sm rounded-full shadow-lg active:shadow-xl transition-all opacity-80 active:opacity-100 active:scale-95"
-          >
-            <ChevronRight className="w-6 h-6 text-gray-700" />
+            <Minimize className="w-6 h-6" />
           </button>
         </div>
 
-        {/* Mobil Alt Navigasyon */}
-        <div className="md:hidden absolute bottom-4 left-1/2 transform -translate-x-1/2">
-          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-4 py-2 shadow-lg">
+
+      </div>
+
+      {/* Mobile Bottom Navigation - Kompakt */}
+      <div className={`md:hidden bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-t border-white/30 dark:border-dark-700/30 shadow-lg transition-all duration-300 ${
+        isFullscreen ? 'hidden' : ''
+      }`}>
+        <div className="px-4 py-2">
+          {/* Navigasyon butonları - mobil */}
+          <div className="flex items-center justify-between">
             <button
-              onClick={toggleBookmark}
-              className={`mobile-nav-button p-2 rounded-full transition-colors ${
-                isBookmarked 
-                  ? 'text-blue-600 bg-blue-50' 
-                  : 'text-gray-600'
-              }`}
+              onClick={goToPrevious}
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors"
             >
-              {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+              <ChevronLeft className="w-3 h-3" />
+              <span className="text-xs">Önceki</span>
             </button>
             
-            <div className="w-px h-6 bg-gray-300"></div>
+            <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+              <span>%{progressPercentage}</span>
+              {totalPages > 0 && (
+                <>
+                  <span>•</span>
+                  <span>{currentPage}/{totalPages}</span>
+                </>
+              )}
+            </div>
             
             <button
-              onClick={() => setShowBookmarks(!showBookmarks)}
-              className="mobile-nav-button p-2 rounded-full text-gray-600 relative"
+              onClick={goToNext}
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors"
             >
-              <MoreVertical className="w-4 h-4" />
-              {bookmarks.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
-                  {bookmarks.length}
-                </span>
-              )}
+              <span className="text-xs">Sonraki</span>
+              <ChevronRight className="w-3 h-3" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Alt Durum Barı */}
-      <div className="bg-gray-50 px-4 py-2 border-t">
-        <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>Okuma modunda</span>
-          <span>Tema: {readerTheme === 'light' ? 'Açık' : readerTheme === 'dark' ? 'Koyu' : 'Sepia'}</span>
+      {/* Bottom Status Bar - Kompakt */}
+      <div className={`hidden md:block bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border-t border-white/30 dark:border-dark-700/30 transition-all duration-300 ${
+        isFullscreen ? 'hidden' : ''
+      }`}>
+        <div className="max-w-7xl mx-auto px-4 py-1.5">
+          <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+            <div className="flex items-center gap-3">
+              <span className="truncate max-w-48">{bookTitle}</span>
+              {currentChapter && (
+                <>
+                  <span>•</span>
+                  <span className="truncate max-w-48">{currentChapter}</span>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <span>%{progressPercentage}</span>
+              {totalPages > 0 && (
+                <>
+                  <span>•</span>
+                  <span>{currentPage}/{totalPages}</span>
+                </>
+              )}
+              <span>•</span>
+              <span>{bookmarks.length} yer işareti</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

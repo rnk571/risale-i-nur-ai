@@ -32,13 +32,15 @@ CREATE TABLE IF NOT EXISTS public.user_book_access (
     UNIQUE(user_id, book_id)
 );
 
--- 4. Reading Progress tablosu (opsiyonel - okuma ilerlemesi takibi)
+-- 4. Reading Progress tablosu (okuma ilerlemesi)
+DROP TABLE IF EXISTS public.reading_progress CASCADE;
+
 CREATE TABLE IF NOT EXISTS public.reading_progress (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
     book_id UUID REFERENCES public.books(id) ON DELETE CASCADE,
-    current_location TEXT, -- EPUB CFI location
-    progress_percentage DECIMAL(5,2) DEFAULT 0,
+    current_location TEXT NOT NULL, -- EPUB CFI location
+    progress_percentage INTEGER NOT NULL CHECK (progress_percentage >= 0 AND progress_percentage <= 100),
     last_read_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -89,8 +91,19 @@ CREATE POLICY "Admins can manage all book access" ON public.user_book_access
 -- Reading Progress tablosu için RLS
 ALTER TABLE public.reading_progress ENABLE ROW LEVEL SECURITY;
 
+-- Önce mevcut politikaları sil
+DROP POLICY IF EXISTS "Users can manage own reading progress" ON public.reading_progress;
+
+-- Yeni politika oluştur
 CREATE POLICY "Users can manage own reading progress" ON public.reading_progress
-    FOR ALL USING (user_id = auth.uid());
+    FOR ALL USING (
+        user_id = auth.uid() OR
+        EXISTS (
+            SELECT 1 FROM public.users 
+            WHERE users.id = auth.uid() 
+            AND users.role = 'admin'
+        )
+    );
 
 -- Triggers for updated_at columns
 CREATE OR REPLACE FUNCTION update_updated_at_column()

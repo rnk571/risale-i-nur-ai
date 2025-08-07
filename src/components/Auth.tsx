@@ -69,13 +69,13 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
           <div className="flex justify-end mb-4">
             <button
               onClick={toggleDarkMode}
-              className="group p-3 bg-white/80 dark:bg-dark-800/80 backdrop-blur-xl border border-white/30 dark:border-dark-600/30 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200"
+              className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
               title={isDarkMode ? 'Açık tema' : 'Koyu tema'}
             >
               {isDarkMode ? (
-                <Sun className="w-5 h-5 text-amber-500 group-hover:text-amber-600 transition-colors group-hover:rotate-180 duration-300" />
+                <Sun className="w-4 h-4" />
               ) : (
-                <Moon className="w-5 h-5 text-slate-600 group-hover:text-slate-700 transition-colors group-hover:rotate-12 duration-300" />
+                <Moon className="w-4 h-4" />
               )}
             </button>
           </div>

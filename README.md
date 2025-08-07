@@ -11,6 +11,7 @@ Modern, responsive ve kullanıcı dostu bir e-kitap okuyucu web uygulaması. Rea
 ## ✨ Özellikler
 
 ### 🎨 **Modern UI/UX**
+
 - **Glassmorphism** tasarım dili
 - **Dark/Light Mode** desteği
 - **Responsive** tasarım (mobil uyumlu)
@@ -18,6 +19,7 @@ Modern, responsive ve kullanıcı dostu bir e-kitap okuyucu web uygulaması. Rea
 - **Professional** görünüm
 
 ### 📚 **Kitap Yönetimi**
+
 - **EPUB formatı** desteği
 - **Kitap kütüphanesi** görünümü
 - **Arama ve filtreleme**
@@ -25,12 +27,14 @@ Modern, responsive ve kullanıcı dostu bir e-kitap okuyucu web uygulaması. Rea
 - **Kapak resmi** desteği
 
 ### 👥 **Kullanıcı Sistemi**
+
 - **Admin/Kullanıcı** rol sistemi
 - **Güvenli authentication** (Supabase Auth)
 - **Kullanıcı bazlı** kitap erişimi
 - **Oturum yönetimi**
 
 ### 📖 **Okuma Deneyimi**
+
 - **Profesyonel EPUB reader**
 - **Okuma ilerlemesi** takibi
 - **Yer işaretleri** (bookmarks)
@@ -39,12 +43,14 @@ Modern, responsive ve kullanıcı dostu bir e-kitap okuyucu web uygulaması. Rea
 - **Sayfa navigasyonu**
 
 ### ⚙️ **Admin Paneli**
+
 - **Kitap ekleme/düzenleme/silme**
 - **Kullanıcı erişim** yönetimi
 - **Kitap durumu** kontrolü
 - **Toplu kullanıcı** atama
 
 ### 🌙 **Dark Mode**
+
 - **Otomatik sistem** tercihi algılama
 - **Manuel tema** değiştirme
 - **LocalStorage** ile tercih kaydetme
@@ -53,23 +59,28 @@ Modern, responsive ve kullanıcı dostu bir e-kitap okuyucu web uygulaması. Rea
 ## 🚀 Kurulum
 
 ### Gereksinimler
-- Node.js 18+ 
+
+- Node.js 18+
 - npm veya yarn
 - Supabase hesabı
 
 ### 1. Projeyi Klonlayın
+
 ```bash
 git clone https://github.com/kullaniciadi/elektronik-kitap-okuyucu.git
 cd elektronik-kitap-okuyucu
 ```
 
 ### 2. Bağımlılıkları Yükleyin
+
 ```bash
 npm install
 ```
 
 ### 3. Environment Variables
+
 `.env` dosyası oluşturun:
+
 ```env
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -78,6 +89,7 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ### 4. Supabase Kurulumu
 
 #### Database Schema
+
 ```sql
 -- Users tablosu (Supabase Auth ile otomatik oluşur)
 -- Ek rol sütunu ekleyin:
@@ -127,6 +139,7 @@ CREATE TABLE bookmarks (
 ```
 
 #### Row Level Security (RLS)
+
 ```sql
 -- Books için RLS
 ALTER TABLE books ENABLE ROW LEVEL SECURITY;
@@ -135,8 +148,8 @@ ALTER TABLE books ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Admin can view all books" ON books
   FOR SELECT USING (
     EXISTS (
-      SELECT 1 FROM auth.users 
-      WHERE auth.users.id = auth.uid() 
+      SELECT 1 FROM auth.users
+      WHERE auth.users.id = auth.uid()
       AND auth.users.role = 'admin'
     )
   );
@@ -145,8 +158,8 @@ CREATE POLICY "Admin can view all books" ON books
 CREATE POLICY "Admin can manage books" ON books
   FOR ALL USING (
     EXISTS (
-      SELECT 1 FROM auth.users 
-      WHERE auth.users.id = auth.uid() 
+      SELECT 1 FROM auth.users
+      WHERE auth.users.id = auth.uid()
       AND auth.users.role = 'admin'
     )
   );
@@ -160,8 +173,8 @@ CREATE POLICY "Users can view their access" ON user_book_access
 CREATE POLICY "Admin can manage access" ON user_book_access
   FOR ALL USING (
     EXISTS (
-      SELECT 1 FROM auth.users 
-      WHERE auth.users.id = auth.uid() 
+      SELECT 1 FROM auth.users
+      WHERE auth.users.id = auth.uid()
       AND auth.users.role = 'admin'
     )
   );
@@ -180,6 +193,7 @@ CREATE POLICY "Users can manage their bookmarks" ON bookmarks
 ```
 
 ### 5. Development Server'ı Başlatın
+
 ```bash
 npm run dev
 ```
@@ -189,15 +203,18 @@ Uygulama `http://localhost:5173` adresinde çalışacaktır.
 ## 📱 Kullanım
 
 ### Demo Hesap
+
 - **Email**: admin@demo.com
 - **Şifre**: admin123
 
 ### Admin Paneli
+
 1. Demo hesabı ile giriş yapın
 2. Header'daki "Admin Paneli" butonuna tıklayın
 3. Kitap ekleyin ve kullanıcılara erişim verin
 
 ### Kitap Okuma
+
 1. Kütüphaneden bir kitap seçin
 2. Okuma ayarlarını özelleştirin
 3. Yer işaretleri ekleyin
@@ -206,6 +223,7 @@ Uygulama `http://localhost:5173` adresinde çalışacaktır.
 ## 🛠️ Teknolojiler
 
 ### Frontend
+
 - **React 18** - UI framework
 - **TypeScript** - Type safety
 - **Tailwind CSS** - Styling
@@ -214,6 +232,7 @@ Uygulama `http://localhost:5173` adresinde çalışacaktır.
 - **Lucide React** - Icons
 
 ### Backend & Database
+
 - **Supabase** - Backend as a Service
 - **PostgreSQL** - Database
 - **Row Level Security** - Data protection
@@ -221,6 +240,7 @@ Uygulama `http://localhost:5173` adresinde çalışacaktır.
 - **Supabase Storage** - File storage
 
 ### EPUB Reading
+
 - **react-reader** - EPUB rendering
 - **epub.js** - EPUB parsing
 
@@ -245,19 +265,21 @@ src/
 ## 🎨 Özelleştirme
 
 ### Dark Mode
+
 ```typescript
 // useDarkMode hook kullanımı
-const { isDarkMode, toggleDarkMode } = useDarkMode()
+const { isDarkMode, toggleDarkMode } = useDarkMode();
 ```
 
 ### Yeni Tema Ekleme
+
 ```css
 /* tailwind.config.js */
 theme: {
   extend: {
     colors: {
-      'custom': {
-        50: '#f0f9ff',
+      "custom": {
+        50: "#f0f9ff";
         // ... diğer tonlar
       }
     }
@@ -268,18 +290,21 @@ theme: {
 ## 🚀 Deployment
 
 ### Vercel
+
 ```bash
 npm run build
 vercel --prod
 ```
 
 ### Netlify
+
 ```bash
 npm run build
 netlify deploy --prod --dir=dist
 ```
 
 ### Docker
+
 ```dockerfile
 FROM node:18-alpine
 WORKDIR /app

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase, type Book } from '../lib/supabase'
-import { Upload, Plus, Trash2, Edit, Eye, EyeOff, BookOpen, Settings } from 'lucide-react'
+import { Upload, Plus, Trash2, Edit, Eye, EyeOff, BookOpen, Settings, Users, Search, ArrowLeft } from 'lucide-react'
 
 interface AdminPanelProps {
   onBackToLibrary: () => void
@@ -21,6 +21,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
   const [uploading, setUploading] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingBook, setEditingBook] = useState<Book | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  // Filtered books
+  const filteredBooks = books.filter(book =>
+    book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    book.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (book.description && book.description.toLowerCase().includes(searchTerm.toLowerCase()))
+  )
 
   // Form state
   const [formData, setFormData] = useState({
@@ -101,8 +109,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       const bookData = {
         title: formData.title,
         author: formData.author,
-        description: formData.description || null,
-        cover_image: formData.cover_image || null,
+        description: formData.description,
+        cover_image: formData.cover_image,
         epub_file_path: epubUrl,
         is_active: true
       }
@@ -110,25 +118,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       let bookId: string
 
       if (editingBook) {
-        // Güncelle
-        const { error } = await supabase
+        // Kitabı güncelle
+        const { data, error } = await supabase
           .from('books')
           .update(bookData)
           .eq('id', editingBook.id)
+          .select('id')
+          .single()
 
         if (error) throw error
-        bookId = editingBook.id
-
-        // Mevcut erişimleri sil ve yenilerini ekle
-        await supabase
-          .from('user_book_access')
-          .delete()
-          .eq('book_id', bookId)
+        bookId = data.id
       } else {
-        // Yeni ekle
+        // Yeni kitap ekle
         const { data, error } = await supabase
           .from('books')
-          .insert([bookData])
+          .insert(bookData)
           .select('id')
           .single()
 
@@ -136,21 +140,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         bookId = data.id
       }
 
-      // Seçilen kullanıcılara erişim ver
-      if (formData.selectedUsers.length > 0) {
-        const accessData = formData.selectedUsers.map(userId => ({
-          user_id: userId,
-          book_id: bookId
-        }))
-
-        const { error: accessError } = await supabase
+      // Kullanıcı erişimlerini güncelle
+      if (bookId) {
+        // Önce mevcut erişimleri sil
+        await supabase
           .from('user_book_access')
-          .insert(accessData)
+          .delete()
+          .eq('book_id', bookId)
 
-        if (accessError) throw accessError
+        // Yeni erişimleri ekle
+        if (formData.selectedUsers.length > 0) {
+          const accessData = formData.selectedUsers.map(userId => ({
+            user_id: userId,
+            book_id: bookId
+          }))
+
+          await supabase
+            .from('user_book_access')
+            .insert(accessData)
+        }
       }
 
-      // Formu temizle ve listeyi yenile
+      // Formu sıfırla
       setFormData({
         title: '',
         author: '',
@@ -159,12 +170,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         epub_file: null,
         selectedUsers: []
       })
-      setShowAddForm(false)
       setEditingBook(null)
-      fetchBooks()
+      setShowAddForm(false)
+
+      // Kitapları yeniden yükle
+      await fetchBooks()
     } catch (error) {
-      console.error('Kitap yükleme hatası:', error)
-      alert('Kitap yüklenirken hata oluştu')
+      console.error('Kitap kaydedilirken hata:', error)
+      alert('Kitap kaydedilirken bir hata oluştu.')
     } finally {
       setUploading(false)
     }
@@ -178,14 +191,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         .eq('id', book.id)
 
       if (error) throw error
-      fetchBooks()
+      await fetchBooks()
     } catch (error) {
       console.error('Kitap durumu güncellenirken hata:', error)
     }
   }
 
   const deleteBook = async (book: Book) => {
-    if (!confirm(`"${book.title}" kitabını silmek istediğinizden emin misiniz?`)) return
+    if (!confirm('Bu kitabı silmek istediğinizden emin misiniz?')) return
 
     try {
       const { error } = await supabase
@@ -194,196 +207,215 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         .eq('id', book.id)
 
       if (error) throw error
-      fetchBooks()
+      await fetchBooks()
     } catch (error) {
       console.error('Kitap silinirken hata:', error)
     }
   }
 
   const startEdit = async (book: Book) => {
-    setEditingBook(book)
-    
-    // Mevcut erişimleri yükle
-    const { data: accessData } = await supabase
-      .from('user_book_access')
-      .select('user_id')
-      .eq('book_id', book.id)
-    
-    const selectedUsers = accessData?.map(access => access.user_id) || []
-    
-    setFormData({
-      title: book.title,
-      author: book.author,
-      description: book.description || '',
-      cover_image: book.cover_image || '',
-      epub_file: null,
-      selectedUsers
-    })
-    setShowAddForm(true)
+    try {
+      // Kitabın mevcut kullanıcı erişimlerini al
+      const { data: accessData } = await supabase
+        .from('user_book_access')
+        .select('user_id')
+        .eq('book_id', book.id)
+
+      const selectedUserIds = accessData?.map(access => access.user_id) || []
+
+      setFormData({
+        title: book.title,
+        author: book.author,
+        description: book.description || '',
+        cover_image: book.cover_image || '',
+        epub_file: null,
+        selectedUsers: selectedUserIds
+      })
+      setEditingBook(book)
+      setShowAddForm(true)
+    } catch (error) {
+      console.error('Kitap düzenleme verileri yüklenirken hata:', error)
+    }
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
-      {/* Modern Admin Header */}
-      <div className="bg-white/90 backdrop-blur-xl shadow-xl border-b border-white/30 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            {/* Left Section - Title */}
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <div className="w-12 h-12 bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl flex items-center justify-center shadow-lg">
-                  <Settings className="w-6 h-6 text-white" />
-                </div>
-                <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full animate-pulse"></div>
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
+        <div className="max-w-7xl mx-auto p-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="w-12 h-12 bg-blue-600 dark:bg-blue-500 rounded-xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+                <Settings className="w-6 h-6 text-white" />
               </div>
-              <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
-                  Admin Paneli
-                </h1>
-                <p className="text-sm text-gray-500 mt-1">Kitap ve kullanıcı yönetimi</p>
-              </div>
-            </div>
-
-            {/* Right Section - Actions */}
-            <div className="flex items-center gap-3">
-              {/* Stats Badge */}
-              <div className="hidden lg:flex items-center gap-4 px-4 py-2 bg-white/80 border border-white/50 rounded-2xl shadow-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <span className="text-sm font-medium text-gray-700">{books.length} Kitap</span>
-                </div>
-                <div className="w-px h-4 bg-gray-300"></div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                  <span className="text-sm font-medium text-gray-700">{users.length} Kullanıcı</span>
-                </div>
-              </div>
-
-              {/* Add Book Button */}
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="group flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
-              >
-                <Plus className="w-5 h-5 transition-transform group-hover:rotate-90" />
-                <span className="font-medium">Kitap Ekle</span>
-              </button>
-
-              {/* Back to Library */}
-              <button
-                onClick={onBackToLibrary}
-                className="group flex items-center gap-2 px-6 py-3 bg-white/80 border border-white/50 text-gray-700 rounded-2xl hover:bg-white hover:border-gray-200 transition-all duration-200 shadow-sm hover:shadow-md"
-              >
-                <BookOpen className="w-5 h-5 transition-transform group-hover:-translate-x-1" />
-                <span className="font-medium hidden sm:inline">Kütüphane</span>
-              </button>
+              <p className="text-gray-600 dark:text-gray-400">Yükleniyor...</p>
             </div>
           </div>
         </div>
       </div>
+    )
+  }
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Modern Add/Edit Form */}
-        {showAddForm && (
-          <div className="bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/30 p-8 mb-12 animate-fade-in-up">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl flex items-center justify-center shadow-lg">
-                  {editingBook ? <Edit className="w-6 h-6 text-white" /> : <Plus className="w-6 h-6 text-white" />}
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
-                    {editingBook ? 'Kitap Düzenle' : 'Yeni Kitap Ekle'}
-                  </h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {editingBook ? 'Mevcut kitabı güncelleyin' : 'Kütüphaneye yeni kitap ekleyin'}
-                  </p>
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onBackToLibrary}
+              className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
+                Admin Paneli
+              </h1>
+              <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">Kitap ve kullanıcı yönetimi</p>
+            </div>
+          </div>
+          
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="flex items-center justify-center gap-2 px-4 sm:px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 dark:hover:from-blue-600 dark:hover:to-indigo-600 transition-all duration-200 shadow-lg hover:shadow-xl"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="hidden sm:inline">{editingBook ? 'Düzenle' : 'Kitap Ekle'}</span>
+            <span className="sm:hidden">{editingBook ? 'Düzenle' : 'Ekle'}</span>
+          </button>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8">
+          <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-2xl p-4 md:p-6 border border-gray-200 dark:border-dark-700/30">
+            <div className="flex items-center gap-3 md:gap-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-500 dark:bg-blue-400 rounded-xl flex items-center justify-center">
+                <BookOpen className="w-5 h-5 md:w-6 md:h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{books.length}</h3>
+                <p className="text-xs md:text-sm text-gray-600 dark:text-gray-400">Toplam Kitap</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-2xl p-4 md:p-6 border border-gray-200 dark:border-dark-700/30">
+            <div className="flex items-center gap-3 md:gap-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-emerald-500 dark:bg-emerald-400 rounded-xl flex items-center justify-center">
+                <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-white dark:bg-dark-700 flex items-center justify-center">
+                  <div className="w-2 h-2 bg-emerald-500 dark:bg-emerald-400 rounded-full"></div>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  setShowAddForm(false)
-                  setEditingBook(null)
-                  setFormData({ title: '', author: '', description: '', cover_image: '', epub_file: null, selectedUsers: [] })
-                }}
-                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
-              >
-                <div className="w-6 h-6 text-gray-400 hover:text-gray-600 font-bold">×</div>
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-8">
-              {/* Basic Information Section */}
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 border border-blue-100">
-                <h3 className="text-lg font-semibold text-gray-900 mb-6 flex items-center gap-2">
-                  <BookOpen className="w-5 h-5 text-blue-600" />
-                  Temel Bilgiler
+              <div>
+                <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {books.filter(book => book.is_active).length}
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <p className="text-xs md:text-sm text-gray-600 dark:text-gray-400">Aktif Kitap</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-2xl p-4 md:p-6 border border-gray-200 dark:border-dark-700/30">
+            <div className="flex items-center gap-3 md:gap-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-purple-500 dark:bg-purple-400 rounded-xl flex items-center justify-center">
+                <Users className="w-5 h-5 md:w-6 md:h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">{users.length}</h3>
+                <p className="text-xs md:text-sm text-gray-600 dark:text-gray-400">Kullanıcı</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-2xl p-4 md:p-6 border border-gray-200 dark:border-dark-700/30">
+            <div className="flex items-center gap-3 md:gap-4">
+              <div className="w-10 h-10 md:w-12 md:h-12 bg-orange-500 dark:bg-orange-400 rounded-xl flex items-center justify-center">
+                <Upload className="w-5 h-5 md:w-6 md:h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl md:text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {books.filter(book => !book.is_active).length}
+                </h3>
+                <p className="text-xs md:text-sm text-gray-600 dark:text-gray-400">Pasif Kitap</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Add/Edit Form */}
+        {showAddForm && (
+          <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-xl rounded-3xl p-8 border border-gray-200 dark:border-dark-700/30 shadow-xl mb-8">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+              {editingBook ? 'Kitap Düzenle' : 'Yeni Kitap Ekle'}
+            </h2>
+            
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Kitap Bilgileri */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Kitap Bilgileri</h3>
+                  
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Kitap Başlığı *
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Kitap Adı *
                     </label>
                     <input
                       type="text"
                       value={formData.title}
                       onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+                      placeholder="Kitap adını girin"
                       required
-                      placeholder="Kitap başlığını girin..."
-                      className="w-full px-4 py-3 bg-white border border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm"
                     />
                   </div>
-
+                  
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Yazar *
                     </label>
                     <input
                       type="text"
                       value={formData.author}
                       onChange={(e) => setFormData({ ...formData, author: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+                      placeholder="Yazar adını girin"
                       required
-                      placeholder="Yazar adını girin..."
-                      className="w-full px-4 py-3 bg-white border border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm"
                     />
                   </div>
-
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Açıklama
                     </label>
                     <textarea
                       value={formData.description}
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      rows={4}
-                      placeholder="Kitap hakkında kısa açıklama..."
-                      className="w-full px-4 py-3 bg-white border border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm resize-none"
+                      rows={3}
+                      className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 resize-none"
+                      placeholder="Kitap açıklaması..."
                     />
                   </div>
-                </div>
-              </div>
-
-              {/* Media Section */}
-              <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 border border-amber-100">
-                <h3 className="text-lg font-semibold text-gray-900 mb-6 flex items-center gap-2">
-                  <Upload className="w-5 h-5 text-amber-600" />
-                  Medya Dosyaları
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       Kapak Resmi URL
                     </label>
                     <input
                       type="url"
                       value={formData.cover_image}
                       onChange={(e) => setFormData({ ...formData, cover_image: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
                       placeholder="https://example.com/cover.jpg"
-                      className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all duration-200 shadow-sm"
                     />
                   </div>
+                </div>
 
+                {/* Dosya ve Erişim */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Dosya ve Erişim</h3>
+                  
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       EPUB Dosyası *
                     </label>
                     <div className="relative">
@@ -391,90 +423,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                         type="file"
                         accept=".epub"
                         onChange={(e) => setFormData({ ...formData, epub_file: e.target.files?.[0] || null })}
+                        className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-gray-100 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-900/50 file:text-blue-700 dark:file:text-blue-300 hover:file:bg-blue-100 dark:hover:file:bg-blue-900/70"
                         required={!editingBook}
-                        className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all duration-200 shadow-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100"
                       />
                     </div>
-                    {editingBook && (
-                      <p className="text-xs text-amber-600 mt-1">
-                        Mevcut dosyayı değiştirmek için yeni dosya seçin
-                      </p>
-                    )}
                   </div>
-                </div>
-              </div>
-
-              {/* Kullanıcı Erişim Seçimi */}
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Erişim Verilecek Kullanıcılar
-                </label>
-                <div className="border border-gray-300 rounded-lg p-3 max-h-40 overflow-y-auto">
-                  {users.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-2">
-                      Henüz kayıtlı kullanıcı bulunmuyor
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      <label className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={formData.selectedUsers.length === users.length}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFormData({ ...formData, selectedUsers: users.map(u => u.id) })
-                            } else {
-                              setFormData({ ...formData, selectedUsers: [] })
-                            }
-                          }}
-                          className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <span className="text-sm font-medium text-gray-700">Tüm Kullanıcılar</span>
-                      </label>
-                      <hr className="my-2" />
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Erişim Verilecek Kullanıcılar
+                    </label>
+                    <div className="max-h-48 overflow-y-auto bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl p-3">
                       {users.map((user) => (
-                        <label key={user.id} className="flex items-center">
+                        <label key={user.id} className="flex items-center gap-3 p-2 hover:bg-white/40 dark:hover:bg-dark-600/40 rounded-lg cursor-pointer">
                           <input
                             type="checkbox"
                             checked={formData.selectedUsers.includes(user.id)}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setFormData({ 
-                                  ...formData, 
-                                  selectedUsers: [...formData.selectedUsers, user.id] 
+                                setFormData({
+                                  ...formData,
+                                  selectedUsers: [...formData.selectedUsers, user.id]
                                 })
                               } else {
-                                setFormData({ 
-                                  ...formData, 
-                                  selectedUsers: formData.selectedUsers.filter(id => id !== user.id) 
+                                setFormData({
+                                  ...formData,
+                                  selectedUsers: formData.selectedUsers.filter(id => id !== user.id)
                                 })
                               }
                             }}
-                            className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                            className="w-4 h-4 text-blue-600 dark:text-blue-400 bg-white dark:bg-dark-600 border-white/30 dark:border-dark-500/30 rounded focus:ring-blue-500 dark:focus:ring-blue-400"
                           />
-                          <span className="text-sm text-gray-900">{user.email}</span>
-                          <span className="text-xs text-gray-500 ml-2">
-                            ({new Date(user.created_at).toLocaleDateString('tr-TR')})
-                          </span>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{user.email}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {new Date(user.created_at).toLocaleDateString('tr-TR')}
+                            </p>
+                          </div>
                         </label>
                       ))}
                     </div>
-                  )}
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      Hiçbir kullanıcı seçilmezse, kitap sadece admin kullanıcılar tarafından görülebilir.
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Seçilen kullanıcılar bu kitabı okuyabilecek. Hiç kullanıcı seçilmezse sadece admin erişebilir.
-                </p>
               </div>
 
-              <div className="md:col-span-2 flex gap-3">
+              {/* Form Actions */}
+              <div className="flex items-center gap-4 pt-6 border-t border-white/30 dark:border-dark-600/30">
                 <button
                   type="submit"
                   disabled={uploading}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 dark:hover:from-blue-600 dark:hover:to-indigo-600 transition-all duration-200 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Upload className="w-4 h-4" />
-                  {uploading ? 'Yükleniyor...' : editingBook ? 'Güncelle' : 'Kitap Ekle'}
+                  {uploading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Kaydediliyor...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5" />
+                      {editingBook ? 'Güncelle' : 'Kitap Ekle'}
+                    </>
+                  )}
                 </button>
+                
                 <button
                   type="button"
                   onClick={() => {
@@ -489,7 +504,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                       selectedUsers: []
                     })
                   }}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors"
+                  className="px-6 py-3 bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-xl"
                 >
                   İptal
                 </button>
@@ -499,117 +514,266 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         )}
 
         {/* Books List */}
-        <div className="bg-white rounded-lg shadow-md">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold">Kitaplar ({books.length})</h2>
+        <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-xl rounded-3xl border border-gray-200 dark:border-dark-700/30 shadow-xl overflow-hidden">
+          <div className="p-6 border-b border-white/30 dark:border-dark-600/30">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Kitap Listesi</h2>
+              
+              {/* Search Bar */}
+              <div className="relative max-w-sm w-full">
+                <div className="absolute inset-y-0 left-3 flex items-center">
+                  <Search className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Kitap, yazar veya açıklama ara..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-white/60 dark:bg-dark-700/60 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 shadow-lg hover:shadow-xl focus:shadow-xl"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute inset-y-0 right-3 flex items-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {/* Desktop Table View */}
+          <div className="hidden lg:block overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-white/60 dark:bg-dark-700/60">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Kitap
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Yazar
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Durum
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Tarih
+                  </th>
+                  <th className="px-6 py-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    İşlemler
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/30 dark:divide-dark-600/30">
+                {filteredBooks.map((book) => (
+                  <tr key={book.id} className="hover:bg-white/40 dark:hover:bg-dark-700/40 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-16 bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 dark:from-blue-600 dark:via-purple-600 dark:to-indigo-700 rounded-lg flex items-center justify-center flex-shrink-0 shadow-md">
+                          {book.cover_image ? (
+                            <img
+                              src={book.cover_image}
+                              alt={book.title}
+                              className="w-full h-full object-cover rounded-lg"
+                            />
+                          ) : (
+                            <BookOpen className="w-6 h-6 text-white" />
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            {book.title}
+                          </h3>
+                          {book.description && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                              {book.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-gray-900 dark:text-gray-100">{book.author}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        book.is_active
+                          ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300'
+                          : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300'
+                      }`}>
+                        {book.is_active ? (
+                          <>
+                            <Eye className="w-3 h-3 mr-1" />
+                            Aktif
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="w-3 h-3 mr-1" />
+                            Pasif
+                          </>
+                        )}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {new Date(book.created_at).toLocaleDateString('tr-TR')}
+                      </p>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => startEdit(book)}
+                          className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded-lg transition-colors"
+                          title="Düzenle"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        
+                        <button
+                          onClick={() => toggleBookStatus(book)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            book.is_active
+                              ? 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/50'
+                              : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/50'
+                          }`}
+                          title={book.is_active ? 'Pasif Yap' : 'Aktif Yap'}
+                        >
+                          {book.is_active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                        
+                        <button
+                          onClick={() => deleteBook(book)}
+                          className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/50 rounded-lg transition-colors"
+                          title="Sil"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
-          {loading ? (
-            <div className="p-8 text-center">
-              <BookOpen className="w-12 h-12 animate-pulse mx-auto mb-4 text-blue-600" />
-              <p>Kitaplar yükleniyor...</p>
-            </div>
-          ) : books.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
-              <BookOpen className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-              <p>Henüz kitap eklenmemiş</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Kitap
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Yazar
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Durum
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Eklenme Tarihi
-                    </th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      İşlemler
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {books.map((book) => (
-                    <tr key={book.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-12 w-8">
-                            {book.cover_image ? (
-                              <img
-                                src={book.cover_image}
-                                alt={book.title}
-                                className="h-12 w-8 object-cover rounded"
-                              />
-                            ) : (
-                              <div className="h-12 w-8 bg-blue-500 rounded flex items-center justify-center">
-                                <BookOpen className="w-4 h-4 text-white" />
-                              </div>
-                            )}
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-sm font-medium text-gray-900">{book.title}</div>
-                            {book.description && (
-                              <div className="text-sm text-gray-500 truncate max-w-xs">
-                                {book.description}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {book.author}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          book.is_active 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {book.is_active ? 'Aktif' : 'Pasif'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+          {/* Mobile Card View */}
+          <div className="lg:hidden p-4 space-y-4">
+            {filteredBooks.map((book) => (
+              <div key={book.id} className="bg-white/60 dark:bg-dark-700/60 backdrop-blur-sm rounded-2xl p-4 border border-gray-200 dark:border-dark-700/30 shadow-lg">
+                <div className="flex items-start gap-4">
+                  <div className="w-16 h-20 bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 dark:from-blue-600 dark:via-purple-600 dark:to-indigo-700 rounded-lg flex items-center justify-center flex-shrink-0 shadow-md">
+                    {book.cover_image ? (
+                      <img
+                        src={book.cover_image}
+                        alt={book.title}
+                        className="w-full h-full object-cover rounded-lg"
+                      />
+                    ) : (
+                      <BookOpen className="w-8 h-8 text-white" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
+                          {book.title}
+                        </h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          {book.author}
+                        </p>
+                      </div>
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium flex-shrink-0 ${
+                        book.is_active
+                          ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300'
+                          : 'bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300'
+                      }`}>
+                        {book.is_active ? (
+                          <>
+                            <Eye className="w-3 h-3 mr-1" />
+                            Aktif
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="w-3 h-3 mr-1" />
+                            Pasif
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    
+                    {book.description && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">
+                        {book.description}
+                      </p>
+                    )}
+                    
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
                         {new Date(book.created_at).toLocaleDateString('tr-TR')}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => toggleBookStatus(book)}
-                            className={`p-1 rounded hover:bg-gray-100 ${
-                              book.is_active ? 'text-red-600' : 'text-green-600'
-                            }`}
-                            title={book.is_active ? 'Pasif yap' : 'Aktif yap'}
-                          >
-                            {book.is_active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                          </button>
-                          <button
-                            onClick={() => startEdit(book)}
-                            className="p-1 rounded hover:bg-gray-100 text-blue-600"
-                            title="Düzenle"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => deleteBook(book)}
-                            className="p-1 rounded hover:bg-gray-100 text-red-600"
-                            title="Sil"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </p>
+                      
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => startEdit(book)}
+                          className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded-lg transition-colors"
+                          title="Düzenle"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        
+                        <button
+                          onClick={() => toggleBookStatus(book)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            book.is_active
+                              ? 'text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/50'
+                              : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/50'
+                          }`}
+                          title={book.is_active ? 'Pasif Yap' : 'Aktif Yap'}
+                        >
+                          {book.is_active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                        
+                        <button
+                          onClick={() => deleteBook(book)}
+                          className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/50 rounded-lg transition-colors"
+                          title="Sil"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {filteredBooks.length === 0 && (
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-gray-200 dark:bg-dark-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <BookOpen className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                {searchTerm ? 'Kitap Bulunamadı' : 'Henüz Kitap Yok'}
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400">
+                {searchTerm 
+                  ? 'Arama kriterlerinizi değiştirip tekrar deneyin' 
+                  : 'İlk kitabınızı eklemek için "Kitap Ekle" butonuna tıklayın.'
+                }
+              </p>
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="mt-4 px-4 py-2 bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-xl"
+                >
+                  Aramayı Temizle
+                </button>
+              )}
             </div>
           )}
         </div>

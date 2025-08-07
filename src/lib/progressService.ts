@@ -42,14 +42,16 @@ export const saveReadingProgress = async (
       })
 
     if (error) {
-      // Tablo bulunamadı hatası varsa sessizce geç
-      if (error.code === '42P01' || error.message.includes('relation "public.reading_progress" does not exist')) {
-        console.warn('reading_progress tablosu bulunamadı, ilerleme kaydedilemiyor')
+      // Tablo bulunamadı veya RLS hatası varsa sessizce geç
+      if (error.code === '42P01' || 
+          error.code === '406' ||
+          error.message.includes('relation "public.reading_progress" does not exist') ||
+          error.message.includes('Not Acceptable')) {
+        console.warn('reading_progress tablosu bulunamadı veya erişim izni yok, ilerleme kaydedilemiyor')
         return
       }
       throw error
     }
-    console.log('Okuma ilerlemesi kaydedildi:', { bookId, location, progressPercentage })
   } catch (error) {
     console.error('Okuma ilerlemesi kaydetme hatası:', error)
   }
@@ -69,13 +71,23 @@ export const getReadingProgress = async (
       .single()
 
     if (error) {
-      // Tablo bulunamadı veya kayıt yok hatalarını sessizce geç
-      if (error.code === 'PGRST116' || error.code === '42P01' || error.message.includes('relation "public.reading_progress" does not exist')) {
-        console.warn('reading_progress tablosu bulunamadı veya kayıt yok')
+      // PGRST116 = 0 rows (henüz okuma ilerlemesi yok) - bu normal bir durum
+      if (error.code === 'PGRST116') {
         return null
       }
+      
+      // Diğer hatalar için kontrol
+      if (error.code === '42P01' || 
+          error.code === '406' ||
+          error.message.includes('relation "public.reading_progress" does not exist') ||
+          error.message.includes('Not Acceptable')) {
+        console.warn('reading_progress tablosu bulunamadı veya erişim izni yok')
+        return null
+      }
+      
       throw error
     }
+    
     return data
   } catch (error) {
     console.error('Okuma ilerlemesi getirme hatası:', error)

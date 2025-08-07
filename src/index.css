@@ -47,6 +47,176 @@ body {
   height: 100% !important;
 }
 
+/* Yükseklik ayarlamaları */
+.react-reader-container {
+  height: calc(100vh - 140px) !important;
+  min-height: calc(100vh - 140px) !important;
+}
+
+.react-reader-container.fullscreen {
+  height: 100vh !important;
+  min-height: 100vh !important;
+}
+
+.react-reader-container .ReactReader__Reader {
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 100% !important;
+}
+
+.react-reader-container .ReactReader__Reader iframe {
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 100% !important;
+}
+
+.react-reader-container .ReactReader__Reader iframe body {
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+/* Mobil için özel yükseklik ayarlamaları */
+@media (max-width: 768px) {
+  .react-reader-container {
+    height: calc(100vh - 120px) !important;
+    min-height: calc(100vh - 120px) !important;
+  }
+  
+  .react-reader-container.fullscreen {
+    height: 100vh !important;
+    min-height: 100vh !important;
+  }
+}
+
+/* Dark mode için ReactReader özelleştirmeleri - KAPSAMLI */
+.dark .react-reader-container,
+.dark .react-reader-container *,
+.dark .react-reader-container .ReactReader__Reader,
+.dark .react-reader-container .ReactReader__Reader *,
+.dark .react-reader-container .ReactReader__Reader iframe,
+.dark .react-reader-container .ReactReader__Reader iframe *,
+.dark .react-reader-container .ReactReader__Reader iframe body,
+.dark .react-reader-container .ReactReader__Reader iframe body *,
+.dark .react-reader-container .ReactReader__Reader iframe html,
+.dark .react-reader-container .ReactReader__Reader iframe html * {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+  border-color: #374151 !important;
+}
+
+/* Dark mode için özel elementler */
+.dark .react-reader-container .ReactReader__Reader iframe body {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+}
+
+.dark .react-reader-container .ReactReader__Reader iframe body p,
+.dark .react-reader-container .ReactReader__Reader iframe body div,
+.dark .react-reader-container .ReactReader__Reader iframe body span,
+.dark .react-reader-container .ReactReader__Reader iframe body h1,
+.dark .react-reader-container .ReactReader__Reader iframe body h2,
+.dark .react-reader-container .ReactReader__Reader iframe body h3,
+.dark .react-reader-container .ReactReader__Reader iframe body h4,
+.dark .react-reader-container .ReactReader__Reader iframe body h5,
+.dark .react-reader-container .ReactReader__Reader iframe body h6 {
+  color: #e5e7eb !important;
+  background-color: transparent !important;
+}
+
+/* Light mode için ReactReader özelleştirmeleri */
+.react-reader-container,
+.react-reader-container .ReactReader__Reader,
+.react-reader-container .ReactReader__Reader iframe,
+.react-reader-container .ReactReader__Reader iframe body {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+/* ReactReader iframe'lerini zorla stillendir */
+.react-reader-container iframe {
+  background-color: inherit !important;
+}
+
+.dark .react-reader-container iframe {
+  background-color: #0f172a !important;
+}
+
+/* Tüm ReactReader elementlerini kapsa */
+.dark .ReactReader__Reader,
+.dark .ReactReader__Reader * {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+}
+
+/* En güçlü dark mode kuralları */
+.dark .react-reader-container,
+.dark .react-reader-container *,
+.dark .react-reader-container iframe,
+.dark .react-reader-container iframe *,
+.dark .react-reader-container iframe body,
+.dark .react-reader-container iframe html {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+}
+
+/* iframe içeriğini zorla stillendir */
+.dark .react-reader-container iframe {
+  background-color: #0f172a !important;
+}
+
+.dark .react-reader-container iframe body {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+}
+
+.dark .react-reader-container iframe html {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+}
+
+/* Tüm metin elementlerini koyu yap */
+.dark .react-reader-container iframe body * {
+  color: #e5e7eb !important;
+  background-color: transparent !important;
+}
+
+/* ReactReader'ın kendi hamburger menü butonu için özel stiller */
+.dark .react-reader-container button[style*="background: rgb(204, 204, 204)"],
+.dark .react-reader-container button span[style*="background: rgb(204, 204, 204)"] {
+  background-color: rgba(229, 231, 235, 0.5) !important;
+}
+
+/* ReactReader'ın menü butonunun span elementleri için */
+.dark .react-reader-container button span {
+  background-color: rgba(229, 231, 235, 0.8) !important;
+}
+
+/* ReactReader'ın tüm butonları için genel kural */
+.dark .react-reader-container button {
+  background-color: transparent !important;
+}
+
+.dark .react-reader-container button span {
+  background-color: rgba(229, 231, 235, 0.8) !important;
+}
+
+/* Özel durumlar için */
+.dark .react-reader-container iframe body p,
+.dark .react-reader-container iframe body div,
+.dark .react-reader-container iframe body span,
+.dark .react-reader-container iframe body h1,
+.dark .react-reader-container iframe body h2,
+.dark .react-reader-container iframe body h3,
+.dark .react-reader-container iframe body h4,
+.dark .react-reader-container iframe body h5,
+.dark .react-reader-container iframe body h6 {
+  color: #e5e7eb !important;
+  background-color: transparent !important;
+}
+
 /* Scrollbar özelleştirmesi */
 .react-reader-container ::-webkit-scrollbar {
   width: 6px;
