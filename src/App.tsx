@@ -16,13 +16,103 @@ interface User {
 }
 
 function App() {
-  const [viewMode, setViewMode] = useState<ViewMode>('auth')
+  // ViewMode'u localStorage'dan al veya varsayılan değer kullan
+  const getInitialViewMode = (): ViewMode => {
+    try {
+      const savedViewMode = localStorage.getItem('readigo_viewMode')
+      if (savedViewMode && ['auth', 'library', 'reader', 'admin'].includes(savedViewMode)) {
+        return savedViewMode as ViewMode
+      }
+    } catch (error) {
+      console.warn('ViewMode localStorage okuma hatası:', error)
+    }
+    return 'auth'
+  }
+
+  // SelectedBook'u localStorage'dan al
+  const getInitialSelectedBook = (): Book | null => {
+    try {
+      const savedBook = localStorage.getItem('readigo_selectedBook')
+      if (savedBook) {
+        return JSON.parse(savedBook)
+      }
+    } catch (error) {
+      console.warn('SelectedBook localStorage okuma hatası:', error)
+    }
+    return null
+  }
+
+  const [viewMode, setViewMode] = useState<ViewMode>(getInitialViewMode)
   const [user, setUser] = useState<User | null>(null)
   const [userRole, setUserRole] = useState<'user' | 'admin' | null>(null)
-  const [selectedBook, setSelectedBook] = useState<Book | null>(null)
+  const [selectedBook, setSelectedBook] = useState<Book | null>(getInitialSelectedBook)
   const [loading, setLoading] = useState(true)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [isPageVisible, setIsPageVisible] = useState(true)
   const { isDarkMode, toggleDarkMode } = useDarkMode()
+
+  // ViewMode değiştiğinde localStorage'a kaydet
+  useEffect(() => {
+    try {
+      localStorage.setItem('readigo_viewMode', viewMode)
+    } catch (error) {
+      console.warn('ViewMode localStorage yazma hatası:', error)
+    }
+  }, [viewMode])
+
+  // SelectedBook değiştiğinde localStorage'a kaydet
+  useEffect(() => {
+    try {
+      if (selectedBook) {
+        localStorage.setItem('readigo_selectedBook', JSON.stringify(selectedBook))
+      } else {
+        localStorage.removeItem('readigo_selectedBook')
+      }
+    } catch (error) {
+      console.warn('SelectedBook localStorage yazma hatası:', error)
+    }
+  }, [selectedBook])
+
+  // Page Visibility API - Sekme odağını takip et
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden)
+      
+      console.log('Visibility change:', {
+        hidden: document.hidden,
+        currentViewMode: viewMode,
+        user: !!user
+      })
+      
+      // Eğer sayfa gizli değilse ve kullanıcı giriş yapmışsa, session'ı kontrol et
+      if (!document.hidden && user) {
+        // Sadece session'ı doğrula, viewMode'u değiştirme
+        validateSession()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [user, viewMode])
+
+  // Session doğrulama fonksiyonu - viewMode'u değiştirmez
+  const validateSession = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session?.user) {
+        // Session yoksa kullanıcıyı çıkış yap ve auth'a yönlendir
+        setUser(null)
+        setUserRole(null)
+        setSelectedBook(null)
+        setViewMode('auth')
+        localStorage.removeItem('readigo_viewMode')
+        localStorage.removeItem('readigo_selectedBook')
+      }
+    } catch (error) {
+      console.warn('Session doğrulama hatası:', error)
+    }
+  }
 
   useEffect(() => {
     // Kullanıcı oturumunu kontrol et
@@ -34,14 +124,21 @@ function App() {
         const { data: { session } } = await supabase.auth.getSession()
         
         if (session?.user) {
-          await loadUserData(session)
+          await loadUserData(session, false) // viewMode'u değiştirmeyi devre dışı bırak
         } else {
+          // Session yoksa auth'a yönlendir ve localStorage'ı temizle
           setViewMode('auth')
+          setSelectedBook(null)
+          localStorage.removeItem('readigo_viewMode')
+          localStorage.removeItem('readigo_selectedBook')
           setLoading(false)
         }
       } catch (error) {
         console.error('Session kontrol hatası:', error)
         setViewMode('auth')
+        setSelectedBook(null)
+        localStorage.removeItem('readigo_viewMode')
+        localStorage.removeItem('readigo_selectedBook')
         setLoading(false)
       }
     }
@@ -52,22 +149,25 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         setLoading(true)
-        await loadUserData(session)
+        await loadUserData(session, true) // İlk giriş için viewMode'u değiştir
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setUserRole(null)
+        setSelectedBook(null)
         setViewMode('auth')
+        localStorage.removeItem('readigo_viewMode')
+        localStorage.removeItem('readigo_selectedBook')
         setLoading(false)
       } else if (event === 'TOKEN_REFRESHED' && session?.user) {
         setLoading(true)
-        await loadUserData(session)
+        await loadUserData(session, false) // Token yenileme için viewMode'u değiştirme
       }
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
-  const loadUserData = async (session?: any) => {
+  const loadUserData = async (session?: any, shouldChangeViewMode: boolean = true) => {
     try {
       // Session parametresi varsa onu kullan, yoksa session al
       let userSession = session
@@ -86,7 +186,39 @@ function App() {
         
         setUser(user)
         setUserRole(user.role)
-        setViewMode('library')
+        
+        // Sadece belirli durumlarda viewMode'u değiştir
+        if (shouldChangeViewMode) {
+          // Eğer localStorage'da reader mode varsa ve selectedBook varsa, reader'da kal
+          const savedViewMode = localStorage.getItem('readigo_viewMode')
+          const savedBook = localStorage.getItem('readigo_selectedBook')
+          
+          console.log('loadUserData - shouldChangeViewMode:', shouldChangeViewMode)
+          console.log('loadUserData - savedViewMode:', savedViewMode)
+          console.log('loadUserData - savedBook:', savedBook)
+          
+          if (savedViewMode === 'reader' && savedBook) {
+            try {
+              const parsedBook = JSON.parse(savedBook)
+              setSelectedBook(parsedBook)
+              setViewMode('reader')
+              console.log('loadUserData - reader mode restored')
+            } catch (error) {
+              console.warn('Saved book parse hatası:', error)
+              setViewMode('library')
+            }
+          } else if (savedViewMode === 'admin') {
+            // Admin panelindeyken admin panelinde kal
+            setViewMode('admin')
+            console.log('loadUserData - admin mode restored')
+          } else {
+            setViewMode('library')
+            console.log('loadUserData - library mode set')
+          }
+        } else {
+          console.log('loadUserData - viewMode not changed (shouldChangeViewMode: false)')
+        }
+        
         setLoading(false)
         return
       }
@@ -114,6 +246,8 @@ function App() {
   const handleBackToLibrary = () => {
     setSelectedBook(null)
     setViewMode('library')
+    // localStorage'dan reader verilerini temizle
+    localStorage.removeItem('readigo_selectedBook')
   }
 
   const handleLogout = async () => {
@@ -148,10 +282,10 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ios-safe-area">
       {/* Modern Header */}
       {viewMode !== 'reader' && (
-        <header className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg sticky top-0 z-50">
+        <header className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg sticky top-0 z-50 ios-nav-safe-area">
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -222,6 +356,24 @@ function App() {
                             </button>
                           )}
                           
+                          {/* Admin Panelden Çıkış Butonu */}
+                          {userRole === 'admin' && viewMode === 'admin' && (
+                            <button
+                              onClick={() => {
+                                setViewMode('library')
+                                setShowUserMenu(false)
+                                // Admin panel localStorage verilerini temizle
+                                localStorage.removeItem('admin_showAddForm')
+                                localStorage.removeItem('admin_formData')
+                                localStorage.removeItem('admin_editingBook')
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                            >
+                              <BookOpen className="w-4 h-4" />
+                              <span>Kütüphaneye Dön</span>
+                            </button>
+                          )}
+                          
                           <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
                           
                           {/* Logout Button */}
@@ -271,7 +423,13 @@ function App() {
         )}
         {viewMode === 'admin' && userRole === 'admin' && (
           <AdminPanel 
-            onBackToLibrary={() => setViewMode('library')} 
+            onBackToLibrary={() => {
+              setViewMode('library')
+              // Admin panel localStorage verilerini temizle
+              localStorage.removeItem('admin_showAddForm')
+              localStorage.removeItem('admin_formData')
+              localStorage.removeItem('admin_editingBook')
+            }} 
           />
         )}
       </main>
