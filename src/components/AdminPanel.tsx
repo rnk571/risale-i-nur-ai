@@ -19,9 +19,61 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [editingBook, setEditingBook] = useState<Book | null>(null)
-  const [searchTerm, setSearchTerm] = useState('')
+  
+  // localStorage'dan durumları al
+  const getInitialShowAddForm = (): boolean => {
+    try {
+      const saved = localStorage.getItem('admin_showAddForm')
+      return saved === 'true'
+    } catch (error) {
+      return false
+    }
+  }
+
+  const getInitialSearchTerm = (): string => {
+    try {
+      return localStorage.getItem('admin_searchTerm') || ''
+    } catch (error) {
+      return ''
+    }
+  }
+
+  const getInitialFormData = () => {
+    try {
+      const saved = localStorage.getItem('admin_formData')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        return {
+          ...parsed,
+          epub_file: null // File objeleri serialize edilemez
+        }
+      }
+    } catch (error) {
+      console.warn('Form data localStorage okuma hatası:', error)
+    }
+    return {
+      title: '',
+      author: '',
+      description: '',
+      cover_image: '',
+      epub_file: null as File | null,
+      selectedUsers: [] as string[]
+    }
+  }
+
+  const getInitialEditingBook = (): Book | null => {
+    try {
+      const saved = localStorage.getItem('admin_editingBook')
+      return saved ? JSON.parse(saved) : null
+    } catch (error) {
+      return null
+    }
+  }
+
+  const [showAddForm, setShowAddForm] = useState(getInitialShowAddForm)
+  const [editingBook, setEditingBook] = useState<Book | null>(getInitialEditingBook)
+  const [searchTerm, setSearchTerm] = useState(getInitialSearchTerm)
+  const [formData, setFormData] = useState(getInitialFormData)
 
   // Filtered books
   const filteredBooks = books.filter(book =>
@@ -30,16 +82,77 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     (book.description && book.description.toLowerCase().includes(searchTerm.toLowerCase()))
   )
 
-  // Form state
-  const [formData, setFormData] = useState({
-    title: '',
-    author: '',
-    description: '',
-    cover_image: '',
-    language: 'tr' as 'tr' | 'en',
-    epub_file: null as File | null,
-    selectedUsers: [] as string[]
-  })
+  // localStorage'a durumları kaydet
+  useEffect(() => {
+    try {
+      localStorage.setItem('admin_showAddForm', showAddForm.toString())
+    } catch (error) {
+      console.warn('showAddForm localStorage yazma hatası:', error)
+    }
+  }, [showAddForm])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('admin_searchTerm', searchTerm)
+    } catch (error) {
+      console.warn('searchTerm localStorage yazma hatası:', error)
+    }
+  }, [searchTerm])
+
+  useEffect(() => {
+    try {
+      const dataToSave = {
+        ...formData,
+        epub_file: null // File objeleri serialize edilemez
+      }
+      localStorage.setItem('admin_formData', JSON.stringify(dataToSave))
+    } catch (error) {
+      console.warn('formData localStorage yazma hatası:', error)
+    }
+  }, [formData])
+
+  useEffect(() => {
+    try {
+      if (editingBook) {
+        localStorage.setItem('admin_editingBook', JSON.stringify(editingBook))
+      } else {
+        localStorage.removeItem('admin_editingBook')
+      }
+    } catch (error) {
+      console.warn('editingBook localStorage yazma hatası:', error)
+    }
+  }, [editingBook])
+
+  // Page Visibility API - Admin panel durumunu koru
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // Sekme odağına döndüğünde verileri yenile
+        console.log('Admin panel sekme odağına döndü, veriler yenileniyor...')
+        fetchBooks()
+        fetchUsers()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
+  // Component unmount olduğunda localStorage'ı temizle (sadece gerekli durumlarda)
+  useEffect(() => {
+    return () => {
+      // Sadece form kapalıysa ve düzenleme yoksa localStorage'ı temizle
+      if (!showAddForm && !editingBook) {
+        try {
+          localStorage.removeItem('admin_showAddForm')
+          localStorage.removeItem('admin_formData')
+          localStorage.removeItem('admin_editingBook')
+        } catch (error) {
+          console.warn('localStorage temizleme hatası:', error)
+        }
+      }
+    }
+  }, [])
 
   useEffect(() => {
     fetchBooks()
@@ -184,7 +297,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
 
         // Yeni erişimleri ekle
         if (formData.selectedUsers.length > 0) {
-          const accessData = formData.selectedUsers.map(userId => ({
+          const accessData = formData.selectedUsers.map((userId: string) => ({
             user_id: userId,
             book_id: bookId
           }))
@@ -498,7 +611,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                               } else {
                                 setFormData({
                                   ...formData,
-                                  selectedUsers: formData.selectedUsers.filter(id => id !== user.id)
+                                  selectedUsers: formData.selectedUsers.filter((id: string) => id !== user.id)
                                 })
                               }
                             }}

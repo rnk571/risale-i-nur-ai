@@ -47,6 +47,67 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     })
   }, [])
 
+  // Page Visibility API ile sekme odağını takip et
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && renditionRef.current) {
+        // Sekme odağına döndüğünde mevcut konumu kaydet
+        const currentLocation = renditionRef.current.currentLocation()
+        if (currentLocation && currentLocation.start) {
+          const cfi = currentLocation.start.cfi
+          if (cfi && userId && bookId) {
+            // Mevcut konumu kaydet
+            saveReadingProgress(userId, bookId, cfi, progressPercentage)
+          }
+        }
+        
+        // Tema ve font boyutunu yeniden uygula
+        setTimeout(() => {
+          if (renditionRef.current) {
+            const currentTheme = isDarkMode ? 'dark' : 'light'
+            renditionRef.current.themes.select(currentTheme)
+            renditionRef.current.themes.fontSize(`${fontSize}%`)
+            
+            // iframe'leri yeniden yapılandır
+            const iframes = document.querySelectorAll('.react-reader-container iframe')
+            iframes.forEach((iframe: any) => {
+              try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+                if (iframeDoc) {
+                  if (isDarkMode) {
+                    iframeDoc.body.style.backgroundColor = '#0f172a'
+                    iframeDoc.body.style.color = '#e5e7eb'
+                    iframeDoc.documentElement.style.backgroundColor = '#0f172a'
+                    iframeDoc.documentElement.style.color = '#e5e7eb'
+                  } else {
+                    iframeDoc.body.style.backgroundColor = '#ffffff'
+                    iframeDoc.body.style.color = '#1f2937'
+                    iframeDoc.documentElement.style.backgroundColor = '#ffffff'
+                    iframeDoc.documentElement.style.color = '#1f2937'
+                  }
+                }
+              } catch (error) {
+                console.log('Sekme odağında iframe yapılandırma hatası:', error)
+              }
+            })
+          }
+        }, 200)
+      } else if (document.hidden && renditionRef.current) {
+        // Sekme gizlendiğinde mevcut konumu kaydet
+        const currentLocation = renditionRef.current.currentLocation()
+        if (currentLocation && currentLocation.start) {
+          const cfi = currentLocation.start.cfi
+          if (cfi && userId && bookId) {
+            saveReadingProgress(userId, bookId, cfi, progressPercentage)
+          }
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [userId, bookId, progressPercentage, isDarkMode, fontSize])
+
   // Menü dış tıklamada kapanması için
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -862,8 +923,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
   if (isLoading) {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
-        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0">
+      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ios-safe-area">
+        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ios-nav-safe-area">
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -900,8 +961,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
   if (error) {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
-        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0">
+      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ios-safe-area">
+        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ios-nav-safe-area">
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -940,11 +1001,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   }
 
   return (
-    <div className={`h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${
+    <div className={`h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ios-safe-area ${
       isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
     }`}>
       {/* Modern Reader Header - Kompakt */}
-      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ${
+      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ios-nav-safe-area ${
         isFullscreen ? 'hidden' : ''
       }`}>
         <div className="max-w-7xl mx-auto px-4 py-3">
@@ -1306,12 +1367,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         )}
 
         {/* Fullscreen Toggle Button - Top Right */}
-        <div className={`md:hidden fixed top-6 right-6 z-50 transition-all duration-300 ${
+        <div className={`md:hidden fixed top-12 right-6 z-50 transition-all duration-300 ${
           isFullscreen ? 'block' : 'hidden'
         }`}>
           <button
             onClick={toggleFullscreen}
-            className="p-3 bg-black/20 backdrop-blur-sm rounded-full border border-white/30 shadow-lg hover:shadow-xl transition-all duration-200 text-white flex items-center justify-center"
+            className="p-2 text-gray-600/50 dark:text-white/50 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
             <Minimize className="w-6 h-6" />
           </button>
