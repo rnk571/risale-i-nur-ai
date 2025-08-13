@@ -14,6 +14,7 @@ export interface Book {
   description?: string
   cover_image?: string
   epub_file_path: string
+  language?: 'tr' | 'en'
   created_at: string
   updated_at: string
   is_active: boolean

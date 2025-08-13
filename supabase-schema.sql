@@ -18,10 +18,15 @@ CREATE TABLE IF NOT EXISTS public.books (
     description TEXT,
     cover_image TEXT,
     epub_file_path TEXT NOT NULL,
+    language TEXT DEFAULT 'tr' CHECK (language IN ('tr','en')),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Mevcut kurulumlar için language sütununu ekle
+ALTER TABLE public.books
+    ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'tr' CHECK (language IN ('tr','en'));
 
 -- 3. User Book Access tablosu (kullanıcıların hangi kitaplara erişimi olduğu)
 CREATE TABLE IF NOT EXISTS public.user_book_access (

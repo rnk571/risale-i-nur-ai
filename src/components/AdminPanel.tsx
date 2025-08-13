@@ -36,6 +36,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     author: '',
     description: '',
     cover_image: '',
+    language: 'tr' as 'tr' | 'en',
     epub_file: null as File | null,
     selectedUsers: [] as string[]
   })
@@ -97,47 +98,80 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formData.title || !formData.author || !formData.epub_file) return
+    if (!formData.title || !formData.author) return
+    if (!editingBook && !formData.epub_file) return
 
     try {
       setUploading(true)
 
-      // EPUB dosyasını yükle
-      const epubUrl = await handleFileUpload(formData.epub_file)
+      // EPUB dosyası: yeni dosya varsa yükle, yoksa (düzenlemede) mevcut yolu kullan
+      let epubUrl = editingBook?.epub_file_path || ''
+      if (formData.epub_file) {
+        epubUrl = await handleFileUpload(formData.epub_file)
+      }
 
-      // Kitabı veritabanına ekle
-      const bookData = {
+      // Kitap veri gövdesi
+      const bookData: any = {
         title: formData.title,
         author: formData.author,
         description: formData.description,
         cover_image: formData.cover_image,
-        epub_file_path: epubUrl,
-        is_active: true
+        language: formData.language,
+        epub_file_path: epubUrl
       }
 
       let bookId: string
 
       if (editingBook) {
         // Kitabı güncelle
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('books')
           .update(bookData)
           .eq('id', editingBook.id)
           .select('id')
           .single()
 
-        if (error) throw error
-        bookId = data.id
+        if (error) {
+          if ((error as any).code === '42703' || String((error as any).message || '').includes('language')) {
+            const { language, ...bookDataNoLang } = bookData
+            const retry = await supabase
+              .from('books')
+              .update(bookDataNoLang)
+              .eq('id', editingBook.id)
+              .select('id')
+              .single()
+            if (retry.error) throw retry.error
+            bookId = retry.data!.id
+          } else {
+            throw error
+          }
+        } else {
+          bookId = data!.id
+        }
       } else {
         // Yeni kitap ekle
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('books')
-          .insert(bookData)
+          .insert({ ...bookData, is_active: true })
           .select('id')
           .single()
 
-        if (error) throw error
-        bookId = data.id
+        if (error) {
+          if ((error as any).code === '42703' || String((error as any).message || '').includes('language')) {
+            const { language, ...bookDataNoLang } = bookData
+            const retry = await supabase
+              .from('books')
+              .insert({ ...bookDataNoLang, is_active: true })
+              .select('id')
+              .single()
+            if (retry.error) throw retry.error
+            bookId = retry.data!.id
+          } else {
+            throw error
+          }
+        } else {
+          bookId = data!.id
+        }
       }
 
       // Kullanıcı erişimlerini güncelle
@@ -167,6 +201,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         author: '',
         description: '',
         cover_image: '',
+        language: 'tr',
         epub_file: null,
         selectedUsers: []
       })
@@ -228,6 +263,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         author: book.author,
         description: book.description || '',
         cover_image: book.cover_image || '',
+          language: (book.language as 'tr' | 'en') || 'tr',
         epub_file: null,
         selectedUsers: selectedUserIds
       })
@@ -408,6 +444,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                       placeholder="https://example.com/cover.jpg"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Dil
+                    </label>
+                    <select
+                      value={formData.language}
+                      onChange={(e) => setFormData({ ...formData, language: e.target.value as 'tr' | 'en' })}
+                      className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-gray-100"
+                    >
+                      <option value="tr">Türkçe</option>
+                      <option value="en">İngilizce</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Dosya ve Erişim */}
@@ -500,6 +550,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                       author: '',
                       description: '',
                       cover_image: '',
+                      language: 'tr',
                       epub_file: null,
                       selectedUsers: []
                     })
@@ -557,6 +608,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                     Yazar
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                    Dil
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Durum
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -597,6 +651,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-sm text-gray-900 dark:text-gray-100">{book.author}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
+                        book.language === 'en'
+                          ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
+                          : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                      }`}>
+                        {book.language === 'en' ? 'EN' : 'TR'}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -682,9 +745,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                         <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
                           {book.title}
                         </h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          {book.author}
-                        </p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              {book.author}
+                            </p>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
+                              book.language === 'en'
+                                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
+                                : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                            }`}>
+                              {book.language === 'en' ? 'EN' : 'TR'}
+                            </span>
+                          </div>
                       </div>
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium flex-shrink-0 ${
                         book.is_active
