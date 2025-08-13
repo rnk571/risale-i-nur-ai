@@ -1,8 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Bu değerleri Supabase projenizden alacaksınız
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'your-supabase-url'
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-supabase-anon-key'
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+if (!supabaseUrl || !supabaseKey) {
+  // Prod güvenliği: env yoksa uygulama çalışmasın
+  throw new Error('Supabase config missing: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be set')
+}
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
@@ -15,6 +20,7 @@ export interface Book {
   cover_image?: string
   epub_file_path: string
   language?: 'tr' | 'en'
+  is_public?: boolean
   created_at: string
   updated_at: string
   is_active: boolean

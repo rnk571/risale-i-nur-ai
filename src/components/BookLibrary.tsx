@@ -9,7 +9,7 @@ interface BookLibraryProps {
   isDarkMode?: boolean
 }
 
-export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId, userRole }) => {
+export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }) => {
   const [books, setBooks] = useState<Book[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -17,44 +17,21 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId, 
 
   useEffect(() => {
     fetchBooks()
-  }, [userId, userRole])
+  }, [userId])
 
   const fetchBooks = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      // Admin kullanıcıları tüm kitapları görebilir
-      let query = supabase
+      // Tek sorgu, sonuçları RLS belirler: admin tüm aktifleri, user ise public + atanmışları görür
+      const { data, error } = await supabase
         .from('books')
         .select('*')
         .eq('is_active', true)
+        .order('created_at', { ascending: false })
 
-      // Sadece normal kullanıcılar için erişim kontrolü yap
-      if (userId && userRole === 'user') {
-        // Kullanıcının erişimi olan kitapları getir
-        const { data: accessData } = await supabase
-          .from('user_book_access')
-          .select('book_id')
-          .eq('user_id', userId)
-
-        if (accessData && accessData.length > 0) {
-          const bookIds = accessData.map(access => access.book_id)
-          query = query.in('id', bookIds)
-        } else {
-          // Kullanıcının hiçbir kitaba erişimi yoksa boş liste döndür
-          setBooks([])
-          setLoading(false)
-          return
-        }
-      }
-
-      const { data, error } = await query.order('created_at', { ascending: false })
-
-      if (error) {
-        throw error
-      }
-
+      if (error) throw error
       setBooks(data || [])
     } catch (err) {
       console.error('Kitaplar yüklenirken hata:', err)
@@ -213,7 +190,7 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId, 
                     <h3 className="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-200 text-sm leading-tight">
                       {book.title}
                     </h3>
-                     <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
                        <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{book.author}</p>
                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
                          book.language === 'en'
@@ -222,6 +199,11 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId, 
                        }`}>
                          {book.language === 'en' ? 'EN' : 'TR'}
                        </span>
+                      {book.is_public && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
+                          Public
+                        </span>
+                      )}
                      </div>
                     {book.description && (
                       <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2 leading-relaxed">

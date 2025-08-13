@@ -4,10 +4,11 @@ import { Auth } from './components/Auth'
 import { BookLibrary } from './components/BookLibrary'
 import { EpubReader } from './components/EpubReader'
 import { AdminPanel } from './components/AdminPanel'
+import { Profile } from './components/Profile'
 import { useDarkMode } from './hooks/useDarkMode'
-import { BookOpen, Settings, LogOut, Moon, Sun, Menu } from 'lucide-react'
+import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon } from 'lucide-react'
 
-type ViewMode = 'auth' | 'library' | 'reader' | 'admin'
+type ViewMode = 'auth' | 'library' | 'reader' | 'admin' | 'profile'
 
 interface User {
   id: string
@@ -20,7 +21,7 @@ function App() {
   const getInitialViewMode = (): ViewMode => {
     try {
       const savedViewMode = localStorage.getItem('readigo_viewMode')
-      if (savedViewMode && ['auth', 'library', 'reader', 'admin'].includes(savedViewMode)) {
+      if (savedViewMode && ['auth', 'library', 'reader', 'admin', 'profile'].includes(savedViewMode)) {
         return savedViewMode as ViewMode
       }
     } catch (error) {
@@ -122,6 +123,7 @@ function App() {
         
         if (session?.user) {
           await loadUserData(session, false) // viewMode'u değiştirmeyi devre dışı bırak
+          setLoading(false)
         } else {
           // Session yoksa auth'a yönlendir ve localStorage'ı temizle
           setViewMode('auth')
@@ -147,6 +149,7 @@ function App() {
       if (event === 'SIGNED_IN' && session?.user) {
         setLoading(true)
         await loadUserData(session, true) // İlk giriş için viewMode'u değiştir
+        setLoading(false)
       } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setUserRole(null)
@@ -158,6 +161,7 @@ function App() {
       } else if (event === 'TOKEN_REFRESHED' && session?.user) {
         setLoading(true)
         await loadUserData(session, false) // Token yenileme için viewMode'u değiştirme
+        setLoading(false)
       }
     })
 
@@ -174,15 +178,14 @@ function App() {
       }
       
       if (userSession?.user) {
-        // Session'dan user objesi oluştur
-        const user: User = {
+        // Önce optimistik olarak user rolünü 'user' olarak ayarla
+        const optimisticUser: User = {
           id: userSession.user.id,
           email: userSession.user.email!,
-          role: userSession.user.email === 'admin@demo.com' ? 'admin' : 'user'
+          role: 'user'
         }
-        
-        setUser(user)
-        setUserRole(user.role)
+        setUser(optimisticUser)
+        setUserRole('user')
         
         // Sadece belirli durumlarda viewMode'u değiştir
         if (shouldChangeViewMode) {
@@ -208,6 +211,10 @@ function App() {
             // Admin panelindeyken admin panelinde kal
             setViewMode('admin')
             console.log('loadUserData - admin mode restored')
+          } else if (savedViewMode === 'profile') {
+            // Profil sayfasındayken profil sayfasında kal
+            setViewMode('profile')
+            console.log('loadUserData - profile mode restored')
           } else {
             setViewMode('library')
             console.log('loadUserData - library mode set')
@@ -216,18 +223,29 @@ function App() {
           console.log('loadUserData - viewMode not changed (shouldChangeViewMode: false)')
         }
         
-        setLoading(false)
+        // Rolü arkaplanda getir ve güncelle
+        supabase
+          .from('users')
+          .select('role')
+          .eq('id', userSession.user.id)
+          .maybeSingle()
+          .then(({ data: roleRow, error: roleError }: any) => {
+            if (!roleError && roleRow && (roleRow as any).role === 'admin') {
+              setUserRole('admin')
+              setUser(prev => prev ? { ...prev, role: 'admin' } : prev)
+            }
+          })
         return
       }
       
       // Session yoksa hata
-      setLoading(false)
       setViewMode('auth')
       
     } catch (error) {
       console.error('Kullanıcı verileri yüklenirken hata:', error)
-      setLoading(false)
       setViewMode('auth')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -339,6 +357,34 @@ function App() {
                         </div>
                         
                         <div className="p-2">
+                          {/* Profile Button */}
+                          {viewMode === 'library' && (
+                            <button
+                              onClick={() => {
+                                setViewMode('profile')
+                                setShowUserMenu(false)
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                            >
+                              <UserIcon className="w-4 h-4" />
+                              <span>Profilim</span>
+                            </button>
+                          )}
+                          
+                          {/* Profile'dan Çıkış Butonu */}
+                          {viewMode === 'profile' && (
+                            <button
+                              onClick={() => {
+                                setViewMode('library')
+                                setShowUserMenu(false)
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                            >
+                              <BookOpen className="w-4 h-4" />
+                              <span>Kütüphaneye Dön</span>
+                            </button>
+                          )}
+                          
                           {/* Admin Panel Button */}
                           {userRole === 'admin' && viewMode === 'library' && (
                             <button
@@ -427,6 +473,12 @@ function App() {
               localStorage.removeItem('admin_formData')
               localStorage.removeItem('admin_editingBook')
             }} 
+          />
+        )}
+        {viewMode === 'profile' && user && (
+          <Profile 
+            user={user}
+            onBackToLibrary={() => setViewMode('library')}
           />
         )}
       </main>

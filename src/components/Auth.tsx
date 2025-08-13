@@ -12,6 +12,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -23,6 +24,13 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
     setMessage(null)
 
     try {
+      if (!isLogin) {
+        if (password !== confirmPassword) {
+          setError('Şifreler eşleşmiyor')
+          setLoading(false)
+          return
+        }
+      }
       if (isLogin) {
         // Giriş yap
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -51,6 +59,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
         if (data.user) {
           setMessage('Kayıt başarılı! E-posta adresinizi kontrol edin.')
           setIsLogin(true)
+          setConfirmPassword('')
         }
       }
     } catch (err: any) {
@@ -64,22 +73,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 flex items-center justify-center p-4 transition-colors duration-300">
       <div className="max-w-md w-full">
-        {/* Dark Mode Toggle - Top Right */}
-        {toggleDarkMode && (
-          <div className="flex justify-end mb-4">
-            <button
-              onClick={toggleDarkMode}
-              className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
-              title={isDarkMode ? 'Açık tema' : 'Koyu tema'}
-            >
-              {isDarkMode ? (
-                <Sun className="w-4 h-4" />
-              ) : (
-                <Moon className="w-4 h-4" />
-              )}
-            </button>
-          </div>
-        )}
+        {/* Theme toggle removed on Auth screen (navbar toggle remains) */}
 
         {/* Floating Card */}
         <div className="bg-white/80 dark:bg-dark-900/80 backdrop-blur-xl shadow-2xl rounded-3xl p-8 border border-white/20 dark:border-dark-700/30 transition-colors duration-300">
@@ -169,6 +163,31 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
                   </div>
                 </div>
               </div>
+
+              {/* Confirm Password Field (Register only) */}
+              {!isLogin && (
+                <div className="relative">
+                  <label htmlFor="confirm-password" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-300">
+                    Şifre (Tekrar)
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5 transition-colors duration-300" />
+                    <input
+                      id="confirm-password"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required={!isLogin}
+                      minLength={6}
+                      className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all duration-200 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+                      placeholder="Şifrenizi tekrar girin"
+                    />
+                    <div className="absolute inset-y-0 right-3 flex items-center">
+                      <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Submit Button */}
@@ -198,6 +217,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
                   setIsLogin(!isLogin)
                   setError(null)
                   setMessage(null)
+                  setConfirmPassword('')
                 }}
                 className="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 text-sm font-medium transition-colors duration-200 relative group"
               >
@@ -211,15 +231,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
           </form>
         </div>
 
-        {/* Demo Info */}
-        <div className="text-center mt-8">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-xl border border-white/30 dark:border-dark-600/30 transition-colors duration-300">
-            <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
-            <p className="text-xs text-gray-600 dark:text-gray-300 font-medium transition-colors duration-300">
-              Demo: admin@demo.com / admin123
-            </p>
-          </div>
-        </div>
+        {/* Demo Info removed for production */}
       </div>
     </div>
   )
