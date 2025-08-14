@@ -41,7 +41,6 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
   const [selectedScrollMode, setSelectedScrollMode] = useState<ScrollMode>(ScrollMode.Vertical)
   const verticalModeRef = useRef<HTMLSpanElement | null>(null)
   const horizontalModeRef = useRef<HTMLSpanElement | null>(null)
-  const pageModeRef = useRef<HTMLSpanElement | null>(null)
   const resumePageRef = useRef<number | null>(null)
 
   const toolbarPluginInstance = toolbarPlugin()
@@ -136,7 +135,6 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
     let targetRef: HTMLSpanElement | null = null
     if (mode === ScrollMode.Vertical) targetRef = verticalModeRef.current
     else if (mode === ScrollMode.Horizontal) targetRef = horizontalModeRef.current
-    else targetRef = pageModeRef.current
     const btn = targetRef?.querySelector('button') as HTMLButtonElement | null
     if (btn) btn.click()
   }
@@ -350,7 +348,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
                                 <Maximize className="w-4 h-4" />
                               )}
                             </button>
-                            {/* Scroll mode buttons with state tracking (custom icons) */}
+                            {/* Scroll mode buttons with state tracking (Vertical/Horizontal) */}
                             <button
                               onClick={() => { setSelectedScrollMode(ScrollMode.Vertical); applyScrollMode(ScrollMode.Vertical); setOpenMenu(false) }}
                               className={`p-1.5 rounded-md flex items-center justify-center ${selectedScrollMode === ScrollMode.Vertical ? 'bg-blue-50/60 dark:bg-blue-900/30' : ''}`}
@@ -383,18 +381,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
                                 </div>
                               </div>
                             </button>
-                            <button
-                              onClick={() => { setSelectedScrollMode(ScrollMode.Page); applyScrollMode(ScrollMode.Page); setOpenMenu(false) }}
-                              className={`p-1.5 rounded-md flex items-center justify-center ${selectedScrollMode === ScrollMode.Page ? 'bg-blue-50/60 dark:bg-blue-900/30' : ''}`}
-                              title="Page"
-                              aria-label="Page"
-                              type="button"
-                              aria-pressed={selectedScrollMode === ScrollMode.Page}
-                            >
-                              <div className="w-5 h-5 flex items-center justify-center">
-                                <span className="block w-3 h-4 border border-current rounded-sm"></span>
-                              </div>
-                            </button>
+                            {/* Page mode kaldırıldı */}
                           </div>
                         </div>
                       )
@@ -469,7 +456,6 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
                       <>
                         <span ref={verticalModeRef}><SwitchScrollMode mode={ScrollMode.Vertical} /></span>
                         <span ref={horizontalModeRef}><SwitchScrollMode mode={ScrollMode.Horizontal} /></span>
-                        <span ref={pageModeRef}><SwitchScrollMode mode={ScrollMode.Page} /></span>
                       </>
                     )
                   }}
@@ -531,7 +517,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
           </div>
         </Worker>
         {isFullscreen && (
-          <div className="fixed top-4 right-4 z-50">
+          <div className="fixed top-12 right-6 z-50">
             <button
               onClick={() => setIsFullscreen(false)}
               className="p-2 transition-colors text-gray-600/70 dark:text-white/70 hover:text-gray-900 dark:hover:text-white"

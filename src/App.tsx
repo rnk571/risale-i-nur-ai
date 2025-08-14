@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { supabase, type Book } from './lib/supabase'
 import { Auth } from './components/Auth'
 import { BookLibrary } from './components/BookLibrary'
@@ -7,6 +8,7 @@ import { EpubReader } from './components/EpubReader'
 import { PdfReader } from './components/PdfReader'
 import { AdminPanel } from './components/AdminPanel'
 import { Profile } from './components/Profile'
+
 import { useDarkMode } from './hooks/useDarkMode'
 import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon } from 'lucide-react'
 
@@ -20,6 +22,8 @@ interface User {
 
 function App() {
   const { t, i18n } = useTranslation()
+
+  
   // ViewMode'u localStorage'dan al veya varsayılan değer kullan
   const getInitialViewMode = (): ViewMode => {
     try {
@@ -220,6 +224,8 @@ function App() {
   const handleAuthSuccess = () => {
     // Auth başarılı olduğunda loadUserData zaten çağrılacak
   }
+
+
 
   const handleBookSelect = (book: Book) => {
     setSelectedBook(book)
