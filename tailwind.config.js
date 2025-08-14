@@ -29,6 +29,12 @@ export default {
       backgroundImage: {
         'gradient-dark': 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)',
         'gradient-dark-light': 'linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%)',
+      },
+      spacing: {
+        'safe-top': 'env(safe-area-inset-top)',
+        'safe-bottom': 'env(safe-area-inset-bottom)',
+        'safe-left': 'env(safe-area-inset-left)',
+        'safe-right': 'env(safe-area-inset-right)',
       }
     },
   },

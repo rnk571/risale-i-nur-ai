@@ -245,6 +245,24 @@ CREATE POLICY "Admins can upload EPUB files" ON storage.objects
     FOR INSERT WITH CHECK (
         bucket_id = 'epub-files' AND public.is_admin()
     );
+-- Storage bucket for PDF files
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('pdf-files', 'pdf-files', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage policy for PDF files
+CREATE POLICY "Public can view PDF files" ON storage.objects
+    FOR SELECT USING (bucket_id = 'pdf-files');
+
+CREATE POLICY "Admins can upload PDF files" ON storage.objects
+    FOR INSERT WITH CHECK (
+        bucket_id = 'pdf-files' AND public.is_admin()
+    );
+
+CREATE POLICY "Admins can delete PDF files" ON storage.objects
+    FOR DELETE USING (
+        bucket_id = 'pdf-files' AND public.is_admin()
+    );
 
 CREATE POLICY "Admins can delete EPUB files" ON storage.objects
     FOR DELETE USING (

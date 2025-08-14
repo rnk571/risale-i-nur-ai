@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { supabase, type Book } from './lib/supabase'
 import { Auth } from './components/Auth'
 import { BookLibrary } from './components/BookLibrary'
 import { EpubReader } from './components/EpubReader'
+import { PdfReader } from './components/PdfReader'
 import { AdminPanel } from './components/AdminPanel'
 import { Profile } from './components/Profile'
 import { useDarkMode } from './hooks/useDarkMode'
@@ -17,6 +19,7 @@ interface User {
 }
 
 function App() {
+  const { t, i18n } = useTranslation()
   // ViewMode'u localStorage'dan al veya varsayılan değer kullan
   const getInitialViewMode = (): ViewMode => {
     try {
@@ -73,44 +76,9 @@ function App() {
     }
   }, [selectedBook])
 
-  // Page Visibility API - Sekme odağını takip et
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      console.log('Visibility change:', {
-        hidden: document.hidden,
-        currentViewMode: viewMode,
-        user: !!user
-      })
-      
-      // Eğer sayfa gizli değilse ve kullanıcı giriş yapmışsa, session'ı kontrol et
-      if (!document.hidden && user) {
-        // Sadece session'ı doğrula, viewMode'u değiştirme
-        validateSession()
-      }
-    }
+  // Odağa dönünce zorunlu kontrolü devre dışı bıraktık (kullanıcı akışını bölmesin)
 
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [user, viewMode])
-
-  // Session doğrulama fonksiyonu - viewMode'u değiştirmez
-  const validateSession = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session?.user) {
-        // Session yoksa kullanıcıyı çıkış yap ve auth'a yönlendir
-        setUser(null)
-        setUserRole(null)
-        setSelectedBook(null)
-        setViewMode('auth')
-        localStorage.removeItem('readigo_viewMode')
-        localStorage.removeItem('readigo_selectedBook')
-      }
-    } catch (error) {
-      console.warn('Session doğrulama hatası:', error)
-    }
-  }
+  // Eski odağa dönünce sesssion doğrulama fonksiyonu kaldırıldı (akışı bölmemek için)
 
   useEffect(() => {
     // Kullanıcı oturumunu kontrol et
@@ -178,14 +146,14 @@ function App() {
       }
       
       if (userSession?.user) {
-        // Önce optimistik olarak user rolünü 'user' olarak ayarla
+        // Önce optimistik kullanıcıyı ayarla, mevcut admin'i düşürme
         const optimisticUser: User = {
           id: userSession.user.id,
           email: userSession.user.email!,
           role: 'user'
         }
         setUser(optimisticUser)
-        setUserRole('user')
+        setUserRole((prev) => (prev === 'admin' ? 'admin' : 'user'))
         
         // Sadece belirli durumlarda viewMode'u değiştir
         if (shouldChangeViewMode) {
@@ -208,8 +176,8 @@ function App() {
               setViewMode('library')
             }
           } else if (savedViewMode === 'admin') {
-            // Admin panelindeyken admin panelinde kal
-            setViewMode('admin')
+            // Admin panelindeyken aynı modda kal sadece localStorage dokunma
+            setViewMode((prev) => (prev === 'admin' ? prev : 'admin'))
             console.log('loadUserData - admin mode restored')
           } else if (savedViewMode === 'profile') {
             // Profil sayfasındayken profil sayfasında kal
@@ -290,7 +258,7 @@ function App() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">Yükleniyor...</p>
+          <p className="text-gray-600 dark:text-gray-300">{t('common.loading')}</p>
         </div>
       </div>
     )
@@ -309,7 +277,7 @@ function App() {
                 </div>
                 <div>
                   <h1 className="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-                    Readigo
+                    {t('app.name')}
                   </h1>
                 </div>
               </div>
@@ -319,9 +287,21 @@ function App() {
                 <button
                   onClick={toggleDarkMode}
                   className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
-                  title={isDarkMode ? 'Açık moda geç' : 'Koyu moda geç'}
+                  title={isDarkMode ? t('app.light') : t('app.dark')}
                 >
                   {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
+
+                {/* Language Switch */}
+                <button
+                  onClick={() => i18n.changeLanguage(i18n.language?.startsWith('tr') ? 'en' : 'tr')}
+                  className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
+                  title={t('app.switchLanguage')}
+                  aria-label={t('app.switchLanguage')}
+                >
+                  <span className="text-[10px] font-semibold uppercase">
+                    {i18n.language?.startsWith('tr') ? 'EN' : 'TR'}
+                  </span>
                 </button>
 
                 {/* User Menu */}
@@ -330,7 +310,7 @@ function App() {
                     <button
                       onClick={() => setShowUserMenu(!showUserMenu)}
                       className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
-                      title="Kullanıcı menüsü"
+                      title={t('app.userMenu')}
                     >
                       <Menu className="w-4 h-4" />
                     </button>
@@ -350,7 +330,7 @@ function App() {
                                   ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300' 
                                   : 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
                               }`}>
-                                {userRole === 'admin' ? 'Admin' : 'Kullanıcı'}
+                                {userRole === 'admin' ? t('app.admin') : t('app.user')}
                               </span>
                             </div>
                           </div>
@@ -367,7 +347,7 @@ function App() {
                               className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                             >
                               <UserIcon className="w-4 h-4" />
-                              <span>Profilim</span>
+                              <span>{t('app.profile')}</span>
                             </button>
                           )}
                           
@@ -381,7 +361,7 @@ function App() {
                               className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                             >
                               <BookOpen className="w-4 h-4" />
-                              <span>Kütüphaneye Dön</span>
+                              <span>{t('app.toLibrary')}</span>
                             </button>
                           )}
                           
@@ -395,7 +375,7 @@ function App() {
                               className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                             >
                               <Settings className="w-4 h-4" />
-                              <span>Admin Paneli</span>
+                              <span>{t('app.adminPanel')}</span>
                             </button>
                           )}
                           
@@ -413,7 +393,7 @@ function App() {
                               className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                             >
                               <BookOpen className="w-4 h-4" />
-                              <span>Kütüphaneye Dön</span>
+                              <span>{t('app.toLibrary')}</span>
                             </button>
                           )}
                           
@@ -428,7 +408,7 @@ function App() {
                             className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-red-600 dark:text-red-400"
                           >
                             <LogOut className="w-4 h-4" />
-                            <span>Çıkış Yap</span>
+                            <span>{t('app.logout')}</span>
                           </button>
                         </div>
                       </div>
@@ -454,15 +434,27 @@ function App() {
           />
         )}
         {viewMode === 'reader' && selectedBook && (
-          <EpubReader 
-            bookUrl={selectedBook.epub_file_path} 
-            bookTitle={selectedBook.title} 
-            bookId={selectedBook.id} 
-            userId={user!.id} 
-            onBackToLibrary={handleBackToLibrary}
-            isDarkMode={isDarkMode}
-            toggleDarkMode={toggleDarkMode}
-          />
+          selectedBook.epub_file_path?.toLowerCase().endsWith('.pdf') ? (
+            <PdfReader
+              bookUrl={selectedBook.epub_file_path}
+              bookTitle={selectedBook.title}
+              bookId={selectedBook.id}
+              userId={user!.id}
+              onBackToLibrary={handleBackToLibrary}
+              isDarkMode={isDarkMode}
+              toggleDarkMode={toggleDarkMode}
+            />
+          ) : (
+            <EpubReader 
+              bookUrl={selectedBook.epub_file_path} 
+              bookTitle={selectedBook.title} 
+              bookId={selectedBook.id} 
+              userId={user!.id} 
+              onBackToLibrary={handleBackToLibrary}
+              isDarkMode={isDarkMode}
+              toggleDarkMode={toggleDarkMode}
+            />
+          )
         )}
         {viewMode === 'admin' && userRole === 'admin' && (
           <AdminPanel 

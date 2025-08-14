@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { supabase, type Book } from '../lib/supabase'
 import { BookOpen, Search } from 'lucide-react'
 
@@ -10,6 +11,7 @@ interface BookLibraryProps {
 }
 
 export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }) => {
+  const { t } = useTranslation()
   const [books, setBooks] = useState<Book[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -35,7 +37,7 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
       setBooks(data || [])
     } catch (err) {
       console.error('Kitaplar yüklenirken hata:', err)
-      setError('Kitaplar yüklenemedi. Lütfen tekrar deneyin.')
+      setError(t('library.loadError'))
     } finally {
       setLoading(false)
     }
@@ -51,7 +53,7 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <BookOpen className="w-12 h-12 animate-pulse mx-auto mb-4 text-blue-600 dark:text-blue-400" />
-          <p className="text-gray-600 dark:text-gray-400">Kitaplar yükleniyor...</p>
+          <p className="text-gray-600 dark:text-gray-400">{t('common.loading')}</p>
         </div>
       </div>
     )
@@ -61,14 +63,14 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
     return (
       <div className="text-center py-12">
         <div className="text-red-500 dark:text-red-400 mb-4">
-          <p className="text-lg font-medium">Hata</p>
+          <p className="text-lg font-medium">{t('common.error')}</p>
           <p className="text-sm">{error}</p>
         </div>
         <button
           onClick={fetchBooks}
           className="px-4 py-2 bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg"
         >
-          Tekrar Dene
+          {t('common.retry')}
         </button>
       </div>
     )
@@ -80,10 +82,10 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
         {/* Hero Section */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-6">
-            Kitap Kütüphanesi
+            {t('library.title')}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-8">
-            Dijital kitap koleksiyonunuzu keşfedin. Yüzlerce kitap arasından seçiminizi yapın ve okuma yolculuğunuza başlayın.
+            {t('library.subtitle')}
           </p>
           
           {/* Search Bar */}
@@ -93,7 +95,7 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
             </div>
             <input
               type="text"
-              placeholder="Kitap, yazar veya konu ara..."
+              placeholder={t('library.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-12 pr-6 py-4 bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-lg text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
@@ -111,7 +113,7 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
               <BookOpen className="w-6 h-6 text-white flex-shrink-0" />
             </div>
             <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{filteredBooks.length}</h3>
-            <p className="text-gray-600 dark:text-gray-400 text-sm">Toplam Kitap</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">{t('library.totalBooks')}</p>
           </div>
           <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-2xl p-6 border border-gray-200 dark:border-dark-700/30 text-center">
             <div className="w-12 h-12 bg-emerald-500 dark:bg-emerald-400 rounded-xl flex items-center justify-center mx-auto mb-3">
@@ -120,7 +122,7 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
               </div>
             </div>
             <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">24/7</h3>
-            <p className="text-gray-600 dark:text-gray-400 text-sm">Erişim</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm">{t('library.access')}</p>
           </div>
         </div>
 
@@ -132,20 +134,17 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
                 <BookOpen className="w-10 h-10 text-gray-500 dark:text-gray-400 flex-shrink-0" />
               </div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-                {searchTerm ? 'Kitap Bulunamadı' : 'Henüz Kitap Yok'}
+                {searchTerm ? t('library.notFound') : t('library.noBooks')}
               </h3>
               <p className="text-gray-600 dark:text-gray-400 mb-6">
-                {searchTerm 
-                  ? 'Arama kriterlerinizi değiştirip tekrar deneyin' 
-                  : 'Yönetici tarafından kitaplar eklendiğinde burada görünecek'
-                }
+                {searchTerm ? t('library.notFoundSubtitle') : t('library.emptySubtitle')}
               </p>
               {searchTerm && (
                 <button
                   onClick={() => setSearchTerm('')}
                   className="px-6 py-2 bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-xl"
                 >
-                  Aramayı Temizle
+                  {t('library.clearSearch')}
                 </button>
               )}
             </div>
@@ -192,30 +191,36 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
                     </h3>
                     <div className="flex items-center gap-2">
                        <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{book.author}</p>
-                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
-                         book.language === 'en'
-                           ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
-                           : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
-                       }`}>
-                         {book.language === 'en' ? 'EN' : 'TR'}
-                       </span>
-                      {book.is_public && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
-                          Public
-                        </span>
-                      )}
-                     </div>
+                    </div>
                     {book.description && (
                       <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2 leading-relaxed">
                         {book.description}
                       </p>
                     )}
+                    {/* Badges at bottom */}
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
+                        book.language === 'en'
+                          ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
+                          : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                      }`}>
+                        {book.language === 'en' ? 'EN' : 'TR'}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                        {((book as any).epub_file_path || '').toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}
+                      </span>
+                      {book.is_public && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
+                          {t('common.public')}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Read Button */}
                   <div className="mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                     <div className="w-full py-2 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 text-white text-xs font-semibold rounded-xl text-center shadow-lg">
-                      Okumaya Başla
+                      {t('common.startReading')}
                     </div>
                   </div>
                 </div>

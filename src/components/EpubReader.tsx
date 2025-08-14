@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ReactReader } from 'react-reader'
 import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2 } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType } from '../lib/progressService'
@@ -14,6 +15,7 @@ interface EpubReaderProps {
 }
 
 export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode }) => {
+  const { t } = useTranslation()
   const [location, setLocation] = useState<string | number>(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -47,66 +49,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     })
   }, [])
 
-  // Page Visibility API ile sekme odağını takip et
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && renditionRef.current) {
-        // Sekme odağına döndüğünde mevcut konumu kaydet
-        const currentLocation = renditionRef.current.currentLocation()
-        if (currentLocation && currentLocation.start) {
-          const cfi = currentLocation.start.cfi
-          if (cfi && userId && bookId) {
-            // Mevcut konumu kaydet
-            saveReadingProgress(userId, bookId, cfi, progressPercentage)
-          }
-        }
-        
-        // Tema ve font boyutunu yeniden uygula
-        setTimeout(() => {
-          if (renditionRef.current) {
-            const currentTheme = isDarkMode ? 'dark' : 'light'
-            renditionRef.current.themes.select(currentTheme)
-            renditionRef.current.themes.fontSize(`${fontSize}%`)
-            
-            // iframe'leri yeniden yapılandır
-            const iframes = document.querySelectorAll('.react-reader-container iframe')
-            iframes.forEach((iframe: any) => {
-              try {
-                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-                if (iframeDoc) {
-                  if (isDarkMode) {
-                    iframeDoc.body.style.backgroundColor = '#0f172a'
-                    iframeDoc.body.style.color = '#e5e7eb'
-                    iframeDoc.documentElement.style.backgroundColor = '#0f172a'
-                    iframeDoc.documentElement.style.color = '#e5e7eb'
-                  } else {
-                    iframeDoc.body.style.backgroundColor = '#ffffff'
-                    iframeDoc.body.style.color = '#1f2937'
-                    iframeDoc.documentElement.style.backgroundColor = '#ffffff'
-                    iframeDoc.documentElement.style.color = '#1f2937'
-                  }
-                }
-              } catch (error) {
-                console.log('Sekme odağında iframe yapılandırma hatası:', error)
-              }
-            })
-          }
-        }, 200)
-      } else if (document.hidden && renditionRef.current) {
-        // Sekme gizlendiğinde mevcut konumu kaydet
-        const currentLocation = renditionRef.current.currentLocation()
-        if (currentLocation && currentLocation.start) {
-          const cfi = currentLocation.start.cfi
-          if (cfi && userId && bookId) {
-            saveReadingProgress(userId, bookId, cfi, progressPercentage)
-          }
-        }
-      }
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [userId, bookId, progressPercentage, isDarkMode, fontSize])
+  // Sekme görünürlüğü değişiminde agresif yan etkileri devre dışı bıraktık
 
   // Menü dış tıklamada kapanması için
   useEffect(() => {
@@ -156,7 +99,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     const timeout = setTimeout(() => {
       if (isLoading) {
         console.error('EPUB yükleme timeout')
-        setError('Kitap yükleme işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.')
+        setError(t('reader.downloadError'))
         setIsLoading(false)
       }
     }, 15000) // 15 saniye timeout
@@ -233,7 +176,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             // Mevcut bölüm bilgisini güncelle
             const currentSpine = book.spine.get(location.start.href)
             if (currentSpine) {
-              setCurrentChapter(currentSpine.navitem?.label || currentSpine.href || 'Bilinmeyen Bölüm')
+              setCurrentChapter(currentSpine.navitem?.label || currentSpine.href || t('reader.unknownChapter'))
             }
             
             // Mevcut sayfa ve toplam sayfa bilgilerini al (sadece mevcut bölüm için)
@@ -520,7 +463,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       } catch (error) {
         console.error('=== DOSYA İNDİRME HATASI ===')
         console.error('Dosya indirme hatası:', error)
-        setError('Kitap dosyası indirilemedi. Lütfen tekrar deneyin.')
+        setError(t('reader.downloadError'))
         setIsLoading(false)
       }
     }
@@ -530,7 +473,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       downloadFile()
     } else {
       console.log('Geçersiz bookUrl:', bookUrl)
-      setError('Geçersiz kitap URL\'si')
+      setError(t('reader.invalidUrl'))
       setIsLoading(false)
     }
 
@@ -691,11 +634,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         
         // Mevcut sayfa bilgilerini kullan
         if (currentPage > 0 && totalPages > 0) {
-          bookmarkNote = `Sayfa ${currentPage}/${totalPages}`
+          bookmarkNote = `${t('reader.pageShort')} ${currentPage}/${totalPages}`
         } else if (currentChapter) {
           bookmarkNote = currentChapter
         } else {
-          bookmarkNote = 'Yer İşareti'
+          bookmarkNote = t('reader.bookmark')
         }
         
         // Locations API ile yüzde hesaplamayı dene
@@ -936,7 +879,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 </button>
                 <div>
                   <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{bookTitle}</h1>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Yükleniyor...</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{t('common.loading')}</p>
                 </div>
               </div>
             </div>
@@ -948,8 +891,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
               <BookOpen className="w-8 h-8 text-white animate-pulse" />
             </div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">Kitap Yükleniyor</h2>
-            <p className="text-gray-600 dark:text-gray-400">Lütfen bekleyin...</p>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">{t('reader.loadingBook')}</h2>
+            <p className="text-gray-600 dark:text-gray-400">{t('reader.pleaseWait')}</p>
             <div className="mt-6 w-64 h-2 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
               <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-full animate-pulse"></div>
             </div>
@@ -974,7 +917,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 </button>
                 <div>
                   <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{bookTitle}</h1>
-                  <p className="text-sm text-red-600 dark:text-red-400">Hata</p>
+            <p className="text-sm text-red-600 dark:text-red-400">{t('common.error')}</p>
                 </div>
               </div>
             </div>
@@ -986,13 +929,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             <div className="w-16 h-16 bg-gradient-to-r from-red-600 to-red-500 dark:from-red-500 dark:to-red-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
               <AlertTriangle className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">Yükleme Hatası</h2>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">{t('reader.loadErrorTitle')}</h2>
             <p className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
             <button
               onClick={() => window.location.reload()}
               className="px-6 py-3 bg-blue-600 dark:bg-blue-500 text-white rounded-xl hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors shadow-lg"
             >
-              Tekrar Dene
+              {t('common.retry')}
             </button>
           </div>
         </div>
@@ -1053,7 +996,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 <button
                   onClick={toggleDarkMode}
                   className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
-                  title={isDarkMode ? 'Açık moda geç' : 'Koyu moda geç'}
+                  title={isDarkMode ? t('app.light') : t('app.dark')}
                 >
                   {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
@@ -1067,7 +1010,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                      ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400' 
                      : 'bg-white dark:bg-dark-800/80 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400'
                  }`}
-                 title={isBookmarked ? 'Yer işaretini kaldır' : 'Yer işareti ekle'}
+                 title={isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
                >
                 {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
               </button>
@@ -1077,7 +1020,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 <button
                   onClick={() => setShowMenu(!showMenu)}
                   className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
-                  title="Menü"
+                  title={t('reader.menu')}
                 >
                   {showMenu ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
                 </button>
@@ -1094,7 +1037,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                          className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                        >
                         <Settings className="w-4 h-4" />
-                        <span>Okuma Ayarları</span>
+                        <span>{t('reader.readingSettings')}</span>
                       </button>
                       
                                              <button
@@ -1105,7 +1048,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                          className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                        >
                         <Bookmark className="w-4 h-4" />
-                        <span>Yer İşaretleri ({bookmarks.length})</span>
+                        <span>{t('reader.bookmarks')} ({bookmarks.length})</span>
                       </button>
                       
                       <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
@@ -1119,7 +1062,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                            className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                          >
                           <Maximize className="w-4 h-4" />
-                          <span>Tam Ekran</span>
+                           <span>{t('reader.fullscreen')}</span>
                         </button>
                       </div>
                       
@@ -1131,7 +1074,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                          className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
                        >
                         <RotateCcw className="w-4 h-4" />
-                        <span>Baştan Başla</span>
+                        <span>{t('reader.restart')}</span>
                       </button>
                     </div>
                   </div>
@@ -1148,7 +1091,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Yer İşaretleri</h3>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{t('reader.bookmarks')}</h3>
                 <span className="text-sm text-gray-600 dark:text-gray-400">({bookmarks.length})</span>
               </div>
               <button
@@ -1163,7 +1106,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             {bookmarks.length === 0 ? (
               <div className="text-center py-8">
                 <Bookmark className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
-                <p className="text-gray-600 dark:text-gray-400">Henüz yer işareti eklenmemiş</p>
+                <p className="text-gray-600 dark:text-gray-400">{t('reader.noBookmarks')}</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-48 overflow-y-auto">
@@ -1200,7 +1143,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                           <button
                             onClick={(e) => deleteBookmarkItem(bookmark, e)}
                             className="p-1 rounded-lg bg-red-100 dark:bg-red-900/50 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50 transition-colors flex items-center justify-center"
-                            title="Yer işaretini sil"
+                             title={t('reader.deleteBookmark')}
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -1220,7 +1163,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         <div className="settings-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Okuma Ayarları</h3>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{t('reader.readingSettings')}</h3>
               <button
                 onClick={() => setShowSettings(false)}
                 className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
@@ -1233,11 +1176,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Theme Selection */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Tema</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.theme')}</label>
                 <div className="flex gap-2">
                                      {[
-                     { id: 'light', name: 'Açık', icon: '☀️' },
-                     { id: 'dark', name: 'Koyu', icon: '🌙' }
+                     { id: 'light', name: t('reader.themeLight'), icon: '☀️' },
+                     { id: 'dark', name: t('reader.themeDark'), icon: '🌙' }
                    ].map((theme) => (
                      <button
                        key={theme.id}
@@ -1262,9 +1205,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
               {/* Font Size */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                  Font Boyutu: {fontSize}%
-                </label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.fontSize')}: {fontSize}%</label>
                 <div className="flex items-center gap-3">
                                      <button
                      onClick={() => changeFontSize(Math.max(50, fontSize - 10))}
@@ -1297,7 +1238,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
             {/* Bookmark Section */}
             <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Yer İşaretleri</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.bookmarks')}</label>
               <div className="flex items-center gap-3">
                                  <button
                    onClick={toggleBookmark}
@@ -1308,9 +1249,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                    }`}
                  >
                   {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
-                  <span className="text-sm font-medium">
-                    {isBookmarked ? 'Yer İşaretini Kaldır' : 'Yer İşareti Ekle'}
-                  </span>
+                   <span className="text-sm font-medium">{isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}</span>
                 </button>
                 
                 <span className="text-sm text-gray-600 dark:text-gray-400">
@@ -1325,8 +1264,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                  onClick={resetReader}
                  className="flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
                >
-                <RotateCcw className="w-4 h-4" />
-                Sıfırla
+                 <RotateCcw className="w-4 h-4" />
+                {t('reader.reset')}
               </button>
             </div>
           </div>
@@ -1356,9 +1295,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <BookOpen className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-              <p className="text-gray-600 dark:text-gray-400">
-                {isLoading ? 'Kitap yükleniyor...' : 'Kitap yüklenemedi'}
-              </p>
+            <p className="text-gray-600 dark:text-gray-400">{isLoading ? t('common.loading') : t('reader.loadErrorTitle')}</p>
               {error && (
                 <p className="text-red-500 text-sm mt-2">{error}</p>
               )}

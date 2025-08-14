@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { supabase } from '../lib/supabase'
-import { BookOpen, Mail, Lock, AlertCircle, Moon, Sun } from 'lucide-react'
+import { BookOpen, Mail, Lock, AlertCircle } from 'lucide-react'
 
 interface AuthProps {
   onAuthSuccess: () => void
@@ -8,7 +9,8 @@ interface AuthProps {
   toggleDarkMode?: () => void
 }
 
-export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, toggleDarkMode }) => {
+export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
+  const { t } = useTranslation()
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -26,7 +28,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
     try {
       if (!isLogin) {
         if (password !== confirmPassword) {
-          setError('Şifreler eşleşmiyor')
+          setError(t('auth.passwordMismatch'))
           setLoading(false)
           return
         }
@@ -57,14 +59,14 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
         }
 
         if (data.user) {
-          setMessage('Kayıt başarılı! E-posta adresinizi kontrol edin.')
+          setMessage(t('auth.registerSuccess'))
           setIsLogin(true)
           setConfirmPassword('')
         }
       }
     } catch (err: any) {
       console.error('Auth hatası:', err)
-      setError(err.message || 'Bir hata oluştu')
+      setError(err.message || t('common.error'))
     } finally {
       setLoading(false)
     }
@@ -89,13 +91,10 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
             </div>
             
             <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-2 transition-colors duration-300">
-              {isLogin ? 'Hoş Geldiniz!' : 'Aramıza Katılın!'}
+              {isLogin ? t('auth.welcome') : t('auth.join')}
             </h1>
             <p className="text-gray-600 dark:text-gray-300 transition-colors duration-300">
-              {isLogin 
-                ? 'Kitap okuma yolculuğunuza devam edin' 
-                : 'Dijital okuma deneyiminiz başlasın'
-              }
+              {isLogin ? t('auth.welcomeSubtitle') : t('auth.joinSubtitle')}
             </p>
           </div>
           
@@ -122,7 +121,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
               {/* Email Field */}
               <div className="relative">
                 <label htmlFor="email" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-300">
-                  E-posta Adresi
+                  {t('auth.email')}
                 </label>
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5 transition-colors duration-300" />
@@ -133,7 +132,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
                     onChange={(e) => setEmail(e.target.value)}
                     required
                     className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all duration-200 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
-                    placeholder="ornek@email.com"
+                    placeholder={t('auth.emailPlaceholder')}
                   />
                   <div className="absolute inset-y-0 right-3 flex items-center">
                     <div className="w-2 h-2 bg-blue-400 rounded-full opacity-50"></div>
@@ -144,7 +143,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
               {/* Password Field */}
               <div className="relative">
                 <label htmlFor="password" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-300">
-                  Şifre
+                  {t('auth.password')}
                 </label>
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5 transition-colors duration-300" />
@@ -156,7 +155,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
                     required
                     minLength={6}
                     className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all duration-200 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
-                    placeholder="En az 6 karakter"
+                    placeholder={t('auth.passwordPlaceholder')}
                   />
                   <div className="absolute inset-y-0 right-3 flex items-center">
                     <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
@@ -168,7 +167,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
               {!isLogin && (
                 <div className="relative">
                   <label htmlFor="confirm-password" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-300">
-                    Şifre (Tekrar)
+                    {t('auth.passwordConfirm')}
                   </label>
                   <div className="relative">
                     <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 w-5 h-5 transition-colors duration-300" />
@@ -180,7 +179,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
                       required={!isLogin}
                       minLength={6}
                       className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all duration-200 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
-                      placeholder="Şifrenizi tekrar girin"
+                      placeholder={t('auth.passwordConfirmPlaceholder')}
                     />
                     <div className="absolute inset-y-0 right-3 flex items-center">
                       <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
@@ -199,11 +198,11 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
               {loading ? (
                 <div className="flex items-center justify-center">
                   <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-3"></div>
-                  {isLogin ? 'Giriş yapılıyor...' : 'Kayıt olunuyor...'}
+                  {isLogin ? t('auth.signingIn') : t('auth.signingUp')}
                 </div>
               ) : (
                 <>
-                  {isLogin ? 'Giriş Yap' : 'Hesap Oluştur'}
+                  {isLogin ? t('auth.signIn') : t('auth.signUp')}
                   <div className="absolute inset-0 bg-white rounded-xl opacity-0 hover:opacity-10 transition-opacity duration-200"></div>
                 </>
               )}
@@ -221,10 +220,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, isDarkMode = false, t
                 }}
                 className="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 text-sm font-medium transition-colors duration-200 relative group"
               >
-                {isLogin 
-                  ? 'Hesabınız yok mu? Hesap oluşturun' 
-                  : 'Zaten hesabınız var mı? Giriş yapın'
-                }
+                {isLogin ? t('auth.toggleToSignUp') : t('auth.toggleToSignIn')}
                 <div className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-600 dark:bg-blue-400 transition-all duration-200 group-hover:w-full"></div>
               </button>
             </div>

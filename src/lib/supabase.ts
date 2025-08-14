@@ -19,6 +19,7 @@ export interface Book {
   description?: string
   cover_image?: string
   epub_file_path: string
+  // Geçiş dönemi: EPUB veya PDF URL'ini tek alanda tutuyoruz
   language?: 'tr' | 'en'
   is_public?: boolean
   created_at: string

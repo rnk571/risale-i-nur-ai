@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { supabase } from '../lib/supabase'
 import { User, Mail, Calendar, Shield, Trash2, AlertTriangle, ArrowLeft, UserX } from 'lucide-react'
 
@@ -12,6 +13,7 @@ interface ProfileProps {
 }
 
 export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
+  const { t, i18n } = useTranslation()
   const [userDetails, setUserDetails] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -65,7 +67,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
 
     } catch (err: any) {
       console.error('Kullanıcı detayları yükleme hatası:', err)
-      setError('Kullanıcı bilgileri yüklenemedi')
+      setError(t('profile.loadError'))
     } finally {
       setLoading(false)
     }
@@ -115,7 +117,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">Profil bilgileri yükleniyor...</p>
+          <p className="text-gray-600 dark:text-gray-300">{t('profile.loading')}</p>
         </div>
       </div>
     )
@@ -131,15 +133,13 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
             className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-200 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Kütüphaneye Dön</span>
+            <span>{t('profile.back')}</span>
           </button>
           
           <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
-            Profilim
+            {t('profile.title')}
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">
-            Hesap bilgilerinizi görüntüleyin ve yönetin
-          </p>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">{t('profile.subtitle')}</p>
         </div>
 
         {/* Messages */}
@@ -178,14 +178,16 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
                           ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300' 
                           : 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
                       }`}>
-                        {user.role === 'admin' ? 'Yönetici' : 'Kullanıcı'}
+                        {user.role === 'admin' ? t('app.admin') : t('app.user')}
                       </span>
                       {userDetails?.joinDate && (
                         <span className="text-sm text-gray-600 dark:text-gray-400">
-                          {new Date(userDetails.joinDate).toLocaleDateString('tr-TR', {
-                            year: 'numeric',
-                            month: 'short'
-                          })} tarihinden beri üye
+                          {t('profile.memberSince', {
+                            date: new Date(userDetails.joinDate).toLocaleDateString(
+                              i18n.language?.startsWith('tr') ? 'tr-TR' : 'en-US',
+                              { year: 'numeric', month: 'short' }
+                            )
+                          })}
                         </span>
                       )}
                     </div>
@@ -198,27 +200,21 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
                     <div className="text-xl lg:text-2xl font-bold text-blue-600 dark:text-blue-400">
                       {userDetails?.totalBooks || 0}
                     </div>
-                    <div className="text-xs lg:text-sm text-gray-600 dark:text-gray-400">
-                      Erişilebilir
-                    </div>
+                    <div className="text-xs lg:text-sm text-gray-600 dark:text-gray-400">{t('profile.accessible')}</div>
                   </div>
 
                   <div className="text-center p-3 lg:p-4 bg-orange-50 dark:bg-orange-900/20 rounded-xl">
                     <div className="text-xl lg:text-2xl font-bold text-orange-600 dark:text-orange-400">
                       {userDetails?.readingBooks || 0}
                     </div>
-                    <div className="text-xs lg:text-sm text-gray-600 dark:text-gray-400">
-                      Okunuyor
-                    </div>
+                    <div className="text-xs lg:text-sm text-gray-600 dark:text-gray-400">{t('profile.reading')}</div>
                   </div>
 
                   <div className="text-center p-3 lg:p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
                     <div className="text-xl lg:text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                       {userDetails?.completedBooks || 0}
                     </div>
-                    <div className="text-xs lg:text-sm text-gray-600 dark:text-gray-400">
-                      Tamamlandı
-                    </div>
+                    <div className="text-xs lg:text-sm text-gray-600 dark:text-gray-400">{t('profile.completed')}</div>
                   </div>
                 </div>
               </div>
@@ -230,14 +226,14 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
             <div className="bg-white/80 dark:bg-dark-900/80 backdrop-blur-xl rounded-2xl p-6 border border-white/20 dark:border-dark-700/30 shadow-lg">
               <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
                 <Mail className="w-5 h-5" />
-                Hesap Detayları
+                {t('profile.details')}
               </h3>
               
               <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-800/50 rounded-xl">
                   <div className="flex items-center gap-3">
                     <Mail className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                    <span className="text-sm text-gray-600 dark:text-gray-400">E-posta</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">{t('profile.email')}</span>
                   </div>
                   <span className="font-medium text-gray-900 dark:text-gray-100">{user.email}</span>
                 </div>
@@ -245,14 +241,14 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
                 <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-800/50 rounded-xl">
                   <div className="flex items-center gap-3">
                     <Shield className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                    <span className="text-sm text-gray-600 dark:text-gray-400">Hesap Türü</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">{t('profile.accountType')}</span>
                   </div>
                   <span className={`text-sm px-3 py-1 rounded-full font-medium ${
                     user.role === 'admin' 
                       ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300' 
                       : 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
                   }`}>
-                    {user.role === 'admin' ? 'Yönetici' : 'Kullanıcı'}
+                     {user.role === 'admin' ? t('app.admin') : t('app.user')}
                   </span>
                 </div>
 
@@ -260,10 +256,10 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-800/50 rounded-xl">
                     <div className="flex items-center gap-3">
                       <Calendar className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Üyelik Tarihi</span>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">{t('profile.joinDateLabel')}</span>
                     </div>
                     <span className="font-medium text-gray-900 dark:text-gray-100">
-                      {new Date(userDetails.joinDate).toLocaleDateString('tr-TR', {
+                       {new Date(userDetails.joinDate).toLocaleDateString(i18n.language?.startsWith('tr') ? 'tr-TR' : 'en-US', {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric'
@@ -280,19 +276,17 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
             <div className="bg-red-50/80 dark:bg-red-900/20 backdrop-blur-xl rounded-2xl p-6 border border-red-200/30 dark:border-red-800/30 shadow-lg h-fit">
               <h3 className="text-lg font-bold text-red-700 dark:text-red-300 mb-4 flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5" />
-                Tehlikeli İşlemler
+                {t('profile.dangerZone')}
               </h3>
               
-              <p className="text-sm text-red-600 dark:text-red-400 mb-4">
-                Bu işlem geri alınamaz. Hesabınız ve tüm verileriniz kalıcı olarak silinecektir.
-              </p>
+              <p className="text-sm text-red-600 dark:text-red-400 mb-4">{t('profile.dangerDesc')}</p>
 
               <button
                 onClick={() => setShowDeleteConfirm(true)}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-medium rounded-xl transition-colors duration-200"
               >
                 <UserX className="w-4 h-4" />
-                Hesabımı Sil
+                {t('profile.delete')}
               </button>
             </div>
           </div>
@@ -306,24 +300,20 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
                 <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                   <AlertTriangle className="w-8 h-8 text-red-600 dark:text-red-400" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-                  Hesabı Kalıcı Olarak Sil
-                </h3>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">{t('profile.deleteTitle')}</h3>
                 <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  Bu işlem geri alınamaz. Tüm verileriniz kalıcı olarak silinecektir.
+                  {t('profile.deleteDesc')}
                 </p>
               </div>
 
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Onaylamak için <strong>"HESABIMI SIL"</strong> yazın:
-                </label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('profile.confirmLabel')}</label>
                 <input
                   type="text"
                   value={deleteConfirmText}
                   onChange={(e) => setDeleteConfirmText(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-50 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-gray-900 dark:text-gray-100"
-                  placeholder="HESABIMI SIL"
+                  placeholder={t('profile.confirmPlaceholder')}
                 />
               </div>
 
@@ -337,7 +327,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
                   className="flex-1 px-4 py-2 bg-gray-200 dark:bg-dark-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-dark-600 transition-colors duration-200"
                   disabled={deleteLoading}
                 >
-                  İptal
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleDeleteAccount}
@@ -347,12 +337,12 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
                   {deleteLoading ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Siliniyor...
+                      {t('profile.deleting')}
                     </>
                   ) : (
                     <>
                       <Trash2 className="w-4 h-4" />
-                      Hesabı Sil
+                      {t('profile.delete')}
                     </>
                   )}
                 </button>
