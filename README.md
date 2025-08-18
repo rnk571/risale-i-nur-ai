@@ -37,7 +37,7 @@ Modern, responsive ve kullanıcı dostu bir e-kitap okuyucu web uygulaması. Rea
 
 - **Profesyonel EPUB reader**
 - **Okuma ilerlemesi** takibi
-- **Yer işaretleri** (bookmarks)
+- **Yer işaretleri** (bookmarks) **+ Not ekleme özelliği**
 - **Tema seçenekleri** (açık, koyu, sepia)
 - **Font boyutu** ayarlama
 - **Sayfa navigasyonu**
@@ -55,6 +55,35 @@ Modern, responsive ve kullanıcı dostu bir e-kitap okuyucu web uygulaması. Rea
 - **Manuel tema** değiştirme
 - **LocalStorage** ile tercih kaydetme
 - **Smooth geçişler**
+
+### 🔖 **Bookmark Not Sistemi**
+
+- **Özel notlar** ekleme
+- **Otomatik sayfa bilgisi** (not yazmasanız bile)
+- **Modern modal** arayüzü
+- **EPUB ve PDF** desteği
+- **Çok dilli** arayüz
+
+## 📖 Kullanım
+
+### Bookmark Not Ekleme
+
+1. **Kitabı açın** ve okumaya başlayın
+2. **Bookmark butonuna** tıklayın (🔖)
+3. **"Yer İşaretine Not Ekle"** modalı açılacak
+4. **Notunuzu yazın** (opsiyonel)
+5. **"Kaydet"** butonuna tıklayın
+
+**Özellikler:**
+- Not yazmasanız bile sayfa bilgileri otomatik eklenir
+- Bookmark listesinde notlarınız tırnak işareti içinde görünür
+- Hem EPUB hem PDF formatlarında çalışır
+
+### Diğer Özellikler
+
+- **Tema değiştirme**: Sağ üst köşedeki güneş/ay ikonuna tıklayın
+- **Font boyutu**: Ayarlar panelinden font boyutunu ayarlayın
+- **Tam ekran**: Mobilde tam ekran butonuna tıklayın
 
 ## 🚀 Kurulum
 

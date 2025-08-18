@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ReactReader } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2 } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType } from '../lib/progressService'
+import { BookmarkNoteModal } from './BookmarkNoteModal'
 
 interface EpubReaderProps {
   bookUrl: string
@@ -28,6 +29,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const [isBookmarked, setIsBookmarked] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
+  const [showBookmarkNoteModal, setShowBookmarkNoteModal] = useState(false)
+  const [pendingBookmarkLocation, setPendingBookmarkLocation] = useState<string>('')
   const renditionRef = useRef<any>(null)
   const tocRef = useRef<any>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
@@ -626,13 +629,26 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           setIsBookmarked(false)
         }
       } else {
-        // Yeni bookmark ekle
-        const chapterTitleForBookmark = currentChapter || ''
-        
-        // Mevcut sayfa ve ilerleme bilgilerini hesapla
-        let bookmarkNote = ''
-        
-        // Mevcut sayfa bilgilerini kullan
+        // Bookmark not ekleme modalını aç
+        setPendingBookmarkLocation(location as string)
+        setShowBookmarkNoteModal(true)
+      }
+    } catch (error) {
+      console.error('Bookmark işlemi hatası:', error)
+    }
+  }
+
+  const handleAddBookmarkWithNote = async (note: string) => {
+    if (!userId || !bookId || !pendingBookmarkLocation) return
+
+    try {
+      const chapterTitleForBookmark = currentChapter || ''
+      
+      // Mevcut sayfa ve ilerleme bilgilerini hesapla
+      let bookmarkNote = note.trim()
+      
+      // Eğer not boşsa, varsayılan bilgileri ekle
+      if (!bookmarkNote) {
         if (currentPage > 0 && totalPages > 0) {
           bookmarkNote = `${t('reader.pageShort')} ${currentPage}/${totalPages}`
         } else if (currentChapter) {
@@ -640,39 +656,51 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         } else {
           bookmarkNote = t('reader.bookmark')
         }
-        
-        // Locations API ile yüzde hesaplamayı dene
-        if (renditionRef.current?.book?.locations) {
-          try {
-            const percentage = renditionRef.current.book.locations.percentageFromCfi(location as string)
-            if (typeof percentage === 'number' && !isNaN(percentage)) {
-              const percentageRounded = Math.round(percentage * 100)
-              bookmarkNote += ` (%${percentageRounded})`
-            }
-          } catch (error) {
-            console.log('Yüzde hesaplama hatası:', error)
-          }
-        }
-        
-
-        
-        const bookmarkId = await addBookmark(userId, bookId, location as string, bookmarkNote, chapterTitleForBookmark)
-        if (bookmarkId) {
-          const newBookmark: BookmarkType = {
-            id: bookmarkId,
-            user_id: userId,
-            book_id: bookId,
-            location: location as string,
-            note: bookmarkNote,
-            chapter_title: chapterTitleForBookmark,
-            created_at: new Date().toISOString()
-          }
-          setBookmarks([...bookmarks, newBookmark])
-          setIsBookmarked(true)
+      } else {
+        // Not varsa, sayfa bilgisini de ekle (eğer varsa)
+        if (currentPage > 0 && totalPages > 0) {
+          bookmarkNote = `${bookmarkNote}\n${t('reader.pageShort')} ${currentPage}/${totalPages}`
         }
       }
+      
+      // Locations API ile yüzde hesaplamayı dene ve ekle
+      if (renditionRef.current?.book?.locations) {
+        try {
+          const percentage = renditionRef.current.book.locations.percentageFromCfi(pendingBookmarkLocation)
+          if (typeof percentage === 'number' && !isNaN(percentage)) {
+            const percentageRounded = Math.round(percentage * 100)
+            // Yüzde bilgisini mevcut nota ekle
+            if (bookmarkNote.includes('\n')) {
+              // Zaten satır sonu varsa, yüzde bilgisini ekle
+              bookmarkNote = `${bookmarkNote} (%${percentageRounded})`
+            } else {
+              // Satır sonu yoksa, yeni satır ekle
+              bookmarkNote = `${bookmarkNote}\n%${percentageRounded}`
+            }
+          }
+        } catch (error) {
+          console.log('Yüzde hesaplama hatası:', error)
+        }
+      }
+      
+      // Eski yüzde hesaplama kodu kaldırıldı, yukarıda yeni kod var
+      
+      const bookmarkId = await addBookmark(userId, bookId, pendingBookmarkLocation, bookmarkNote, chapterTitleForBookmark)
+      if (bookmarkId) {
+        const newBookmark: BookmarkType = {
+          id: bookmarkId,
+          user_id: userId,
+          book_id: bookId,
+          location: pendingBookmarkLocation,
+          note: bookmarkNote,
+          chapter_title: chapterTitleForBookmark,
+          created_at: new Date().toISOString()
+        }
+        setBookmarks([...bookmarks, newBookmark])
+        setIsBookmarked(true)
+      }
     } catch (error) {
-      console.error('Bookmark işlemi hatası:', error)
+      console.error('Bookmark ekleme hatası:', error)
     }
   }
 
@@ -1012,7 +1040,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                  }`}
                  title={isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
                >
-                {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
               </button>
 
               {/* Menu Button */}
@@ -1120,14 +1148,30 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
-                            {locationInfo.title}
-                          </p>
-                          {locationInfo.details && (
-                            <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">
-                              {locationInfo.details}
-                            </p>
+                          {bookmark.note && bookmark.note.includes('\n') ? (
+                            <>
+                              {/* Not varsa ve satır sonu içeriyorsa, notu üstte göster */}
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                                {bookmark.note.split('\n')[0]}
+                              </p>
+                              <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">
+                                {bookmark.note.split('\n')[1]}
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              {/* Not yoksa veya tek satırsa, sadece başlığı göster */}
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                                {locationInfo.title}
+                              </p>
+                              {bookmark.note && bookmark.note.trim() !== '' && (
+                                <p className="text-xs text-gray-700 dark:text-gray-300 mb-1 italic">
+                                  "{bookmark.note}"
+                                </p>
+                              )}
+                            </>
                           )}
+                          {/* locationInfo.details kaldırıldı çünkü gereksiz tekrar yapıyordu */}
                           <p className="text-xs text-gray-500 dark:text-gray-500">
                             {new Date(bookmark.created_at).toLocaleDateString('tr-TR', {
                               year: 'numeric',
@@ -1248,7 +1292,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                        : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
                    }`}
                  >
-                  {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <Bookmark className="w-4 h-4" />}
+                  {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
                    <span className="text-sm font-medium">{isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}</span>
                 </button>
                 
@@ -1383,6 +1427,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           </div>
         </div>
       </div>
+
+      {/* Bookmark Note Modal */}
+      <BookmarkNoteModal
+        isOpen={showBookmarkNoteModal}
+        onClose={() => setShowBookmarkNoteModal(false)}
+        onSave={handleAddBookmarkWithNote}
+        title={t('reader.addBookmarkNote')}
+      />
     </div>
   )
 }
