@@ -86,7 +86,32 @@
     "pageShort": "Page",
     "paragraph": "Paragraph",
     "bookmark": "Bookmark",
-    "toc": "Table of Contents"
+    "toc": "Table of Contents",
+    "highlight": "Highlight",
+    "copy": "Copy",
+    "search": "Search",
+    "speak": "Speak",
+    "speechLanguage": "Speech Language",
+    "toastTitles": {
+      "success": "Success",
+      "error": "Error",
+      "info": "Info"
+    },
+    "toasts": {
+      "highlightAdded": "Highlight added successfully!",
+      "highlightAddError": "Error while adding highlight!",
+      "highlightUpdated": "Highlight updated successfully!",
+      "highlightUpdateError": "Error while updating highlight!",
+      "highlightDeleted": "Highlight deleted successfully!",
+      "highlightDeleteError": "Error while deleting highlight!",
+      "copySuccess": "Text copied!",
+      "copyError": "Copy failed!",
+      "searchOpened": "Search opened!",
+      "navigatingTo": "Navigating to \"{{quote}}\"...",
+      "ttsNotAvailable": "Text-to-speech not available",
+      "ttsStarted": "Speech started",
+      "ttsStartError": "Could not start speech"
+    }
   },
   "profile": {
     "title": "My Profile",

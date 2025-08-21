@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ReactReader } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType, addHighlight, getHighlights, updateHighlight, deleteHighlight, type Highlight } from '../lib/progressService'
 import { BookmarkNoteModal } from './BookmarkNoteModal'
 import { HighlightModal } from './HighlightModal'
 import { HighlightPanel } from './HighlightPanel'
+import { ContextMenu } from './ContextMenu'
 
 interface EpubReaderProps {
   bookUrl: string
@@ -19,11 +20,17 @@ interface EpubReaderProps {
 
 // iOS için haptic feedback
 let haptics: any = null
+let tts: any = null
 if (typeof window !== 'undefined' && (window as any).Capacitor) {
   import('@capacitor/haptics').then(({ Haptics }) => {
     haptics = Haptics
   }).catch(() => {
     console.log('Haptics plugin yüklenemedi')
+  })
+  import('@capacitor-community/text-to-speech').then((mod) => {
+    tts = mod.TextToSpeech || mod
+  }).catch(() => {
+    console.log('TextToSpeech plugin yüklenemedi')
   })
 }
 
@@ -55,8 +62,15 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   } | null>(null)
   const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null)
   const [showToast, setShowToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null)
+  const [toastEnter, setToastEnter] = useState(false)
+  const [ttsLanguage, setTtsLanguage] = useState<string>('tr-TR')
+  
+  // Context menu states
+  const [showContextMenu, setShowContextMenu] = useState(false)
+  const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 })
   
   const renditionRef = useRef<any>(null)
+  const suppressNextSelectionRef = useRef<boolean>(false)
   const tocRef = useRef<any>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   
@@ -65,6 +79,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const [totalPages, setTotalPages] = useState(0)
   const [currentChapter, setCurrentChapter] = useState('')
   const [, setToc] = useState<any[]>([])
+  const [lastSelectedText, setLastSelectedText] = useState<string>('')
 
   // Component mount olduğunda debug bilgisi
   useEffect(() => {
@@ -99,6 +114,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         setShowHighlights(false)
       }
       
+      // Context menu için
+      if (showContextMenu && !target.closest('.context-menu')) {
+        setShowContextMenu(false)
+      }
+      
       // Ayarlar paneli için
       if (showSettings && !target.closest('.settings-panel')) {
         setShowSettings(false)
@@ -107,7 +127,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showMenu, showBookmarks, showSettings, showHighlights])
+  }, [showMenu, showBookmarks, showSettings, showHighlights, showContextMenu])
 
   // ESC tuşu ile panelleri kapatma
   useEffect(() => {
@@ -119,6 +139,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           setShowBookmarks(false)
         } else if (showHighlights) {
           setShowHighlights(false)
+        } else if (showContextMenu) {
+          setShowContextMenu(false)
         } else if (showMenu) {
           setShowMenu(false)
         }
@@ -127,7 +149,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [showSettings, showBookmarks, showMenu, showHighlights])
+  }, [showSettings, showBookmarks, showMenu, showHighlights, showContextMenu])
 
   // Timeout için yükleme kontrolü
   useEffect(() => {
@@ -359,150 +381,42 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     setIsLoading(false)
     setError(null)
 
-    // iOS için özel text selection handling
+    // Mobile cihaz tespiti
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
                   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    const isAndroid = /Android/i.test(navigator.userAgent)
+    const isMobile = isIOS || isAndroid
     
+    // Mobile cihazlar için eski delayli selection handling iOS için global useEffect ile değiştirildi
+
+    // Android için basit yaklaşım - iframe event listener'ları kaldırıldı
+    // iOS için özel handling korundu
     if (isIOS) {
-      console.log('iOS cihaz tespit edildi, özel text selection handler kullanılıyor')
-      
-      // iOS için iframe içinde text selection event'lerini dinle
-      setTimeout(() => {
-        const iframes = document.querySelectorAll('.react-reader-container iframe')
-        iframes.forEach((iframe: any) => {
-          try {
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-            if (iframeDoc) {
-              // iOS için selection change event listener
-              iframeDoc.addEventListener('selectionchange', () => {
-                const selection = iframeDoc.getSelection()
-                if (selection && selection.toString().trim().length > 0) {
-                  console.log('iOS text selection detected:', selection.toString())
-                  
-                  // CFI range'i al
-                  try {
-                    const range = selection.getRangeAt(0)
-                    const cfiRange = rendition.location.start.cfi + ':' + range.startOffset + ',' + range.endOffset
-                    
-                    const selectedText = selection.toString().trim()
-                    if (selectedText && selectedText.length > 0) {
-                      console.log('iOS selected text:', selectedText)
-                      
-                      // Haptic feedback
-                      if (haptics) {
-                        haptics.impact({ style: 'light' }).catch(() => {})
-                      }
-                      
-                      // Mevcut bölüm bilgisini al
-                      const chapterTitle = currentChapter || ''
-                      
-                      setPendingHighlight({
-                        cfiRange,
-                        selectedText,
-                        chapterTitle
-                      })
-                      setShowHighlightModal(true)
-                      
-                      // Seçimi temizle
-                      selection.removeAllRanges()
-                    }
-                  } catch (error) {
-                    console.error('iOS CFI range oluşturma hatası:', error)
-                  }
-                }
-              })
-              
-              // iOS için touch end event listener (alternatif)
-              iframeDoc.addEventListener('touchend', () => {
-                setTimeout(() => {
-                  const selection = iframeDoc.getSelection()
-                  if (selection && selection.toString().trim().length > 0) {
-                    console.log('iOS touch selection detected:', selection.toString())
-                    
-                    try {
-                      const range = selection.getRangeAt(0)
-                      const cfiRange = rendition.location.start.cfi + ':' + range.startOffset + ',' + range.endOffset
-                      
-                      const selectedText = selection.toString().trim()
-                      if (selectedText && selectedText.length > 0) {
-                        console.log('iOS touch selected text:', selectedText)
-                        
-                        // Haptic feedback
-                        if (haptics) {
-                          haptics.impact({ style: 'light' }).catch(() => {})
-                        }
-                        
-                        const chapterTitle = currentChapter || ''
-                        
-                        setPendingHighlight({
-                          cfiRange,
-                          selectedText,
-                          chapterTitle
-                        })
-                        setShowHighlightModal(true)
-                        
-                        selection.removeAllRanges()
-                      }
-                    } catch (error) {
-                      console.error('iOS touch CFI range oluşturma hatası:', error)
-                    }
-                  }
-                }, 100)
-              })
-              
-              // iOS için mouse up event listener (ek güvenlik)
-              iframeDoc.addEventListener('mouseup', () => {
-                setTimeout(() => {
-                  const selection = iframeDoc.getSelection()
-                  if (selection && selection.toString().trim().length > 0) {
-                    console.log('iOS mouse selection detected:', selection.toString())
-                    
-                    try {
-                      const range = selection.getRangeAt(0)
-                      const cfiRange = rendition.location.start.cfi + ':' + range.startOffset + ',' + range.endOffset
-                      
-                      const selectedText = selection.toString().trim()
-                      if (selectedText && selectedText.length > 0) {
-                        console.log('iOS mouse selected text:', selectedText)
-                        
-                        // Haptic feedback
-                        if (haptics) {
-                          haptics.impact({ style: 'light' }).catch(() => {})
-                        }
-                        
-                        const chapterTitle = currentChapter || ''
-                        
-                        setPendingHighlight({
-                          cfiRange,
-                          selectedText,
-                          chapterTitle
-                        })
-                        setShowHighlightModal(true)
-                        
-                        selection.removeAllRanges()
-                      }
-                    } catch (error) {
-                      console.error('iOS mouse CFI range oluşturma hatası:', error)
-                    }
-                  }
-                }, 50)
-              })
-            }
-          } catch (error) {
-            console.log('iOS iframe event listener hatası:', error)
-          }
-        })
-      }, 1000) // iOS'ta iframe'lerin tam yüklenmesi için daha uzun bekle
+      console.log('iOS cihaz tespit edildi, global selection handler kullanılacak')
+      // iOS selection handling burada değil, aşağıdaki global useEffect içinde yönetiliyor
     }
 
-    // Text selection event listener ekle (mobil uyumlu)
-    rendition.on('selected', (cfiRange: string, contents: any) => {
+    // Text selection event listener ekle (desktop ve fallback için)
+    rendition.on('selected', (cfiRange: string) => {
+      // Eğer bastırma bayrağı aktifse, bu selection event'ini yok say
+      if (suppressNextSelectionRef.current) {
+        console.log('Rendition selection event bastırıldı')
+        return
+      }
+      
       try {
         console.log('Text selected:', cfiRange)
-        const selectedText = rendition.getRange(cfiRange).toString().trim()
+        const range = rendition.getRange(cfiRange)
+        const selectedText = range ? range.toString().trim() : ''
         
         if (selectedText && selectedText.length > 0) {
           console.log('Selected text:', selectedText)
+          
+          // Aynı metin tekrar seçilmişse menüyü açma
+          if (selectedText === lastSelectedText) {
+            console.log('Aynı metin tekrar seçildi, menü açılmıyor')
+            return
+          }
           
           // Mevcut bölüm bilgisini al
           const chapterTitle = currentChapter || ''
@@ -512,10 +426,43 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             selectedText,
             chapterTitle
           })
-          setShowHighlightModal(true)
           
-          // Seçimi temizle
-          contents.window.getSelection().removeAllRanges()
+          // Son seçilen metni kaydet
+          setLastSelectedText(selectedText)
+          
+          // Android ve Desktop için: seçime göre menüyü konumlandır
+          const computeAndShowMenu = () => {
+            try {
+              const rect = range?.getBoundingClientRect()
+              if (rect) {
+                let x = rect.left + rect.width / 2
+                let y = rect.bottom + 10
+                try {
+                  const iframeEl = ((range as any)?.startContainer as any)?.ownerDocument?.defaultView?.frameElement as HTMLIFrameElement | null
+                  if (iframeEl) {
+                    const iframeRect = iframeEl.getBoundingClientRect()
+                    x = iframeRect.left + x
+                    y = iframeRect.top + y
+                  }
+                } catch {}
+                setContextMenuPosition({ x, y })
+              } else {
+                setContextMenuPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+              }
+              setShowContextMenu(true)
+            } catch {
+              setContextMenuPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+              setShowContextMenu(true)
+            }
+          }
+          if (isAndroid) {
+            setTimeout(computeAndShowMenu, 300)
+          } else if (!isMobile) {
+            computeAndShowMenu()
+          }
+          
+          // Seçimi context menu kapandıktan sonra temizle
+          // contents.window.getSelection().removeAllRanges() - KALDIRILDI: Kullanıcı seçimini bozuyor
         }
       } catch (error) {
         console.error('Text selection error:', error)
@@ -641,13 +588,235 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
       // Color map tanımı
       const colorMap: { [key: string]: any } = {
-        yellow: { fill: '#fef3c7', 'fill-opacity': '0.6', 'mix-blend-mode': 'multiply' },
-        blue: { fill: '#dbeafe', 'fill-opacity': '0.6', 'mix-blend-mode': 'multiply' },
-        green: { fill: '#d1fae5', 'fill-opacity': '0.6', 'mix-blend-mode': 'multiply' },
-        pink: { fill: '#fce7f3', 'fill-opacity': '0.6', 'mix-blend-mode': 'multiply' },
-        red: { fill: '#fee2e2', 'fill-opacity': '0.6', 'mix-blend-mode': 'multiply' },
-        purple: { fill: '#e9d5ff', 'fill-opacity': '0.6', 'mix-blend-mode': 'multiply' }
+        yellow: { fill: '#fef3c7', 'fill-opacity': '0.85', 'mix-blend-mode': 'normal' },
+        blue: { fill: '#dbeafe', 'fill-opacity': '0.85', 'mix-blend-mode': 'normal' },
+        green: { fill: '#d1fae5', 'fill-opacity': '0.85', 'mix-blend-mode': 'normal' },
+        pink: { fill: '#fce7f3', 'fill-opacity': '0.85', 'mix-blend-mode': 'normal' },
+        red: { fill: '#fee2e2', 'fill-opacity': '0.85', 'mix-blend-mode': 'normal' },
+        purple: { fill: '#e9d5ff', 'fill-opacity': '0.85', 'mix-blend-mode': 'normal' }
       }
+
+      // CSS fallback'i uygulayan yardımcı
+      const applyCssHighlight = (highlight: any) => {
+        const waitMs = isIOSDevice ? 1200 : 500
+        setTimeout(() => {
+          try {
+            const iframes = document.querySelectorAll('.react-reader-container iframe')
+            console.log(`CSS fallback başlıyor - ${iframes.length} iframe bulundu`)
+            
+            iframes.forEach((iframe: any, iframeIndex: number) => {
+              try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+                if (iframeDoc) {
+                  console.log(`iframe ${iframeIndex} işleniyor...`)
+                  
+                  // Highlight için CSS style ekle
+                  const highlightStyle = iframeDoc.createElement('style')
+                  const colorStyle = colorMap[highlight.color]
+                  const highlightClass = `highlight-${highlight.id}`
+                  
+                  highlightStyle.textContent = `
+                    .${highlightClass} {
+                      background-color: ${colorStyle?.fill || '#fef3c7'} !important;
+                      opacity: ${colorStyle?.['fill-opacity'] || '0.85'} !important;
+                      mix-blend-mode: normal !important;
+                      padding: 2px 4px !important;
+                      border-radius: 3px !important;
+                      box-shadow: 0 0 0 1px rgba(0,0,0,0.15) !important;
+                      cursor: pointer !important;
+                      transition: all 0.2s ease !important;
+                      font-weight: 500 !important;
+                      color: #000000 !important;
+                      -webkit-text-fill-color: #000000 !important;
+                    }
+                    .${highlightClass}:hover {
+                      opacity: 1 !important;
+                      transform: scale(1.02) !important;
+                      box-shadow: 0 2px 8px rgba(0,0,0,0.25) !important;
+                    }
+                  `
+                  
+                  // Mevcut style'ı kontrol et
+                  const existingStyle = iframeDoc.querySelector(`#style-${highlight.id}`)
+                  if (!existingStyle) {
+                    highlightStyle.id = `style-${highlight.id}`
+                    iframeDoc.head.appendChild(highlightStyle)
+                  }
+                  
+                  // Önce tüm text'i topla ve kontrol et
+                  const allText = iframeDoc.body.textContent || ''
+                  console.log(`iframe ${iframeIndex} text uzunluğu:`, allText.length)
+                  console.log(`Aranan text: "${highlight.selected_text}"`)
+                  console.log(`Text mevcut mu:`, allText.includes(highlight.selected_text))
+                  
+                  if (allText.includes(highlight.selected_text)) {
+                    // Gelişmiş text bulma - multiple approaches
+                    let foundAndHighlighted = false
+                    
+                    // Approach 1: TreeWalker ile tam eşleşme
+                    const walker = iframeDoc.createTreeWalker(
+                      iframeDoc.body,
+                      NodeFilter.SHOW_TEXT,
+                      null
+                    )
+                    
+                    let node: any
+                    // @ts-ignore - while ile atama
+                    while (node = walker.nextNode() && !foundAndHighlighted) {
+                      if (node.textContent && node.textContent.includes(highlight.selected_text)) {
+                        console.log(`Text node bulundu: "${node.textContent.substring(0, 100)}..."`)
+                        const parent = node.parentElement
+                        if (parent && !parent.querySelector(`.${highlightClass}`)) {
+                          // Inline text highlighting
+                          try {
+                            const text = node.textContent
+                            const startIndex = text.indexOf(highlight.selected_text)
+                            
+                            if (startIndex >= 0) {
+                              const before = text.substring(0, startIndex)
+                              const highlightText = highlight.selected_text
+                              const after = text.substring(startIndex + highlightText.length)
+                              
+                              const fragment = iframeDoc.createDocumentFragment()
+                              
+                              if (before) {
+                                fragment.appendChild(iframeDoc.createTextNode(before))
+                              }
+                              
+                              const span = iframeDoc.createElement('span')
+                              span.className = highlightClass
+                              span.textContent = highlightText
+                              span.setAttribute('data-highlight-id', highlight.id)
+                              span.setAttribute('data-highlight-text', highlight.selected_text)
+                              span.style.cursor = 'pointer'
+                              
+                              // Highlight'a tıklama event'i ekle
+                              span.addEventListener('click', (e: Event) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                console.log('Highlight span tıklandı:', highlight.id, highlight.selected_text)
+                                
+                                // Highlight panel'ini aç
+                                setShowHighlights(true)
+                                
+                                // Haptic feedback
+                                if (haptics) {
+                                  haptics.impact({ style: 'light' }).catch(() => {})
+                                }
+                              })
+                              
+                              fragment.appendChild(span)
+                              
+                              if (after) {
+                                fragment.appendChild(iframeDoc.createTextNode(after))
+                              }
+                              
+                              parent.replaceChild(fragment, node)
+                              foundAndHighlighted = true
+                              console.log(`Text node highlight başarılı`)
+                            }
+                          } catch (nodeError) {
+                            console.log('Text node highlight hatası:', nodeError)
+                          }
+                        }
+                      }
+                    }
+                    
+                    // Approach 2: Eğer tam eşleşme bulunamazsa, basit DOM query
+                    if (!foundAndHighlighted) {
+                      console.log(`TreeWalker başarısız, DOM query deneniyor...`)
+                      try {
+                        // Tüm text node'ları topla
+                        const textNodes: Node[] = []
+                        const collectTextNodes = (element: Node) => {
+                          if (element.nodeType === Node.TEXT_NODE) {
+                            textNodes.push(element)
+                          } else {
+                            element.childNodes.forEach(collectTextNodes)
+                          }
+                        }
+                        collectTextNodes(iframeDoc.body)
+                        
+                        console.log(`${textNodes.length} text node bulundu`)
+                        
+                        for (const textNode of textNodes) {
+                          if (textNode.textContent && textNode.textContent.includes(highlight.selected_text)) {
+                            console.log(`DOM query ile text bulundu: "${textNode.textContent.substring(0, 50)}..."`)
+                            const parent = (textNode as any).parentElement as HTMLElement | null
+                            if (parent && !parent.querySelector(`.${highlightClass}`)) {
+                              const text = textNode.textContent
+                              const startIndex = text.indexOf(highlight.selected_text)
+                              
+                              if (startIndex >= 0) {
+                                const before = text.substring(0, startIndex)
+                                const highlightText = highlight.selected_text
+                                const after = text.substring(startIndex + highlightText.length)
+                                
+                                const fragment = iframeDoc.createDocumentFragment()
+                                
+                                if (before) fragment.appendChild(iframeDoc.createTextNode(before))
+                                
+                                const span = iframeDoc.createElement('span')
+                                span.className = highlightClass
+                                span.textContent = highlightText
+                                span.setAttribute('data-highlight-id', highlight.id)
+                                span.setAttribute('data-highlight-text', highlight.selected_text)
+                                span.style.cursor = 'pointer'
+                                
+                                // Highlight'a tıklama event'i ekle
+                                span.addEventListener('click', (e: Event) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  console.log('Highlight span tıklandı:', highlight.id, highlight.selected_text)
+                                  
+                                  // Highlight panel'ini aç
+                                  setShowHighlights(true)
+                                  
+                                  // Haptic feedback
+                                  if (haptics) {
+                                    haptics.impact({ style: 'light' }).catch(() => {})
+                                  }
+                                })
+                                
+                                fragment.appendChild(span)
+                                
+                                if (after) fragment.appendChild(iframeDoc.createTextNode(after))
+                                
+                                parent.replaceChild(fragment, textNode)
+                                foundAndHighlighted = true
+                                console.log(`DOM query highlight başarılı`)
+                                break
+                              }
+                            }
+                          }
+                        }
+                      } catch (domError) {
+                        console.log('DOM query hatası:', domError)
+                      }
+                    }
+                    
+                    if (foundAndHighlighted) {
+                      console.log(`✅ Highlight ${highlight.id} CSS ile eklendi`)
+                    } else {
+                      console.log(`⚠️ Highlight ${highlight.id} tüm yöntemler başarısız`)
+                    }
+                  } else {
+                    console.log(`⚠️ iframe ${iframeIndex}'de text bulunamadı`)
+                  }
+                }
+              } catch (cssError) {
+                console.log('CSS highlight hatası:', cssError)
+              }
+            })
+          } catch (generalError) {
+            console.error('CSS highlight genel hatası:', generalError)
+          }
+        }, waitMs)
+      }
+
+      const isAndroid = /Android/i.test(navigator.userAgent)
+      const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      const isWeb = !isAndroid && !isIOSDevice
       
       // Yeni highlight'ları ekle
       highlights.forEach((highlight, index) => {
@@ -675,6 +844,18 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             console.log('Web CFI formatı tespit edildi')
           }
 
+          // Tüm platformlarda: Annotation'ı atla, doğrudan CSS highlight uygula (tutarlılık ve siyah yazı)
+          console.log('Tüm platformlarda CSS highlight uygulanıyor')
+          applyCssHighlight(highlight)
+          return
+
+          // Android ve Web: Annotation'ı atla, doğrudan CSS fallback uygula (siyah yazı için tutarlı)
+          if (isAndroid || isWeb) {
+            console.log(`${isAndroid ? 'Android' : 'Web'} tespit edildi: Annotation atlanıyor, CSS highlight uygulanıyor`)
+            applyCssHighlight(highlight)
+            return
+          }
+
           // Highlight'ı ekle - Önce annotation dene, başarısızsa CSS fallback
           try {
             console.log(`Highlight ${index + 1} annotation API ile deneniyor...`)
@@ -691,347 +872,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             console.warn(`❌ Highlight ${index + 1} annotation başarısız, CSS fallback kullanılıyor:`, annotationError)
             
             // CSS-based highlight fallback (hem iOS hem Web için)
-            setTimeout(() => {
-              try {
-                const iframes = document.querySelectorAll('.react-reader-container iframe')
-                console.log(`CSS fallback başlıyor - ${iframes.length} iframe bulundu`)
-                
-                iframes.forEach((iframe: any, iframeIndex: number) => {
-                  try {
-                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-                    if (iframeDoc) {
-                      console.log(`iframe ${iframeIndex} işleniyor...`)
-                      
-                      // Highlight için CSS style ekle
-                      const highlightStyle = iframeDoc.createElement('style')
-                      const colorStyle = colorMap[highlight.color]
-                      const highlightClass = `highlight-${highlight.id}`
-                      
-                      highlightStyle.textContent = `
-                        .${highlightClass} {
-                          background-color: ${colorStyle?.fill || '#fef3c7'} !important;
-                          color: #000000 !important;
-                          opacity: ${colorStyle?.['fill-opacity'] || '0.6'} !important;
-                          mix-blend-mode: ${colorStyle?.['mix-blend-mode'] || 'multiply'} !important;
-                          padding: 1px 2px !important;
-                          border-radius: 2px !important;
-                          box-shadow: 0 0 0 1px rgba(0,0,0,0.1) !important;
-                          cursor: pointer !important;
-                          transition: all 0.2s ease !important;
-                        }
-                        .${highlightClass}:hover {
-                          opacity: 0.8 !important;
-                          transform: scale(1.02) !important;
-                          box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
-                        }
-                      `
-                      
-                      // Mevcut style'ı kontrol et
-                      const existingStyle = iframeDoc.querySelector(`#style-${highlight.id}`)
-                      if (!existingStyle) {
-                        highlightStyle.id = `style-${highlight.id}`
-                        iframeDoc.head.appendChild(highlightStyle)
-                      }
-                      
-                      // Text normalization fonksiyonları
-                      const normalizeText = (text: string): string => {
-                        return text
-                          .replace(/[\u00A0\u2028\u2029]/g, ' ')
-                          .replace(/[\r\n\t]/g, ' ')
-                          .replace(/[\u201C\u201D\u2018\u2019'\"]/g, '"')
-                          .replace(/[–—]/g, '-')
-                          .replace(/…/g, '...')
-                          .replace(/\s+/g, ' ')
-                          .trim()
-                      }
-
-                      // Normalize edilmiş string ve orijinal index map'ini oluştur
-                      const buildNormalizedMap = (original: string): { normalized: string, indexMap: number[] } => {
-                        let normalized = ''
-                        const indexMap: number[] = []
-                        const isWs = (ch: string) => /[\s\u00A0\u2028\u2029]/.test(ch)
-                        for (let i = 0; i < original.length; i++) {
-                          const ch = original[i]
-                          if (isWs(ch)) {
-                            if (normalized.length === 0 || normalized[normalized.length - 1] !== ' ') {
-                              normalized += ' '
-                              indexMap.push(i)
-                            }
-                            continue
-                          }
-                          if (ch === '…') {
-                            normalized += '...'
-                            indexMap.push(i, i, i)
-                            continue
-                          }
-                          if (ch === '–' || ch === '—') {
-                            normalized += '-'
-                            indexMap.push(i)
-                            continue
-                          }
-                          if (/[\u201C\u201D\u2018\u2019'\"]/ .test(ch)) {
-                            normalized += '"'
-                            indexMap.push(i)
-                            continue
-                          }
-                          normalized += ch
-                          indexMap.push(i)
-                        }
-                        return { normalized, indexMap }
-                      }
-
-                      // Fuzzy text matching - kısmi eşleşmeleri de bulur
-                      const findTextInContent = (content: string, searchText: string): boolean => {
-                        const normalizedContent = normalizeText(content)
-                        const normalizedSearch = normalizeText(searchText)
-                        
-                        // Tam eşleşme kontrolü
-                        if (normalizedContent.includes(normalizedSearch)) {
-                          return true
-                        }
-                        
-                        // Uzun metinler için chunked search
-                        if (normalizedSearch.length > 50) {
-                          // Metni 3 parçaya böl ve her parçayı ara
-                          const chunkSize = Math.ceil(normalizedSearch.length / 3)
-                          const chunks = [
-                            normalizedSearch.substring(0, chunkSize),
-                            normalizedSearch.substring(chunkSize, chunkSize * 2),
-                            normalizedSearch.substring(chunkSize * 2)
-                          ]
-                          
-                          // Tüm chunk'lar bulunuyorsa metni bulmuş sayıyoruz
-                          const foundChunks = chunks.filter(chunk => 
-                            chunk.trim().length > 10 && normalizedContent.includes(chunk.trim())
-                          )
-                          
-                          if (foundChunks.length >= 2) {
-                            console.log(`Chunked search başarılı: ${foundChunks.length}/${chunks.length} chunk bulundu`)
-                            return true
-                          }
-                        }
-                        
-                        return false
-                      }
-
-                      // Önce tüm text'i topla ve kontrol et
-                      const allText = iframeDoc.body.textContent || ''
-                      console.log(`iframe ${iframeIndex} text uzunluğu:`, allText.length)
-                      console.log(`Aranan text: "${highlight.selected_text}"`)
-                      console.log(`Text mevcut mu (basit):`, allText.includes(highlight.selected_text))
-                      console.log(`Text mevcut mu (gelişmiş):`, findTextInContent(allText, highlight.selected_text))
-                      
-                      if (allText.includes(highlight.selected_text) || findTextInContent(allText, highlight.selected_text)) {
-                        // Gelişmiş text bulma - multiple approaches
-                        let foundAndHighlighted = false
-                        
-                        // Gelişmiş text matching fonksiyonu
-                        const findTextInNode = (nodeText: string, searchText: string): { found: boolean, startIndex: number, matchedText: string } => {
-                          // Hızlı yol: orijinal text'te tam eşleşme
-                          const directIndex = nodeText.indexOf(searchText)
-                          if (directIndex >= 0) {
-                            return { found: true, startIndex: directIndex, matchedText: searchText }
-                          }
-                          const normalizedSearchText = normalizeText(searchText)
-                          const { normalized: normalizedNodeText, indexMap } = buildNormalizedMap(nodeText)
-                          // Tam eşleşme: normalized bazlı bul, index'i orijinale map et
-                          const normalizedIndex = normalizedNodeText.indexOf(normalizedSearchText)
-                          if (normalizedIndex >= 0) {
-                            const startOriginal = indexMap[normalizedIndex] ?? 0
-                            const lastNormIndex = Math.min(normalizedIndex + normalizedSearchText.length - 1, indexMap.length - 1)
-                            const lastOriginal = indexMap[lastNormIndex] ?? nodeText.length - 1
-                            const matchedOriginal = nodeText.substring(startOriginal, lastOriginal + 1)
-                            return { found: true, startIndex: startOriginal, matchedText: matchedOriginal }
-                          }
-                          // Uzun metinler için kısmi eşleşme (chunk bazlı)
-                          if (normalizedSearchText.length > 50) {
-                            const chunkSize = Math.ceil(normalizedSearchText.length / 3)
-                            const firstChunk = normalizedSearchText.substring(0, chunkSize)
-                            const secondChunk = normalizedSearchText.substring(chunkSize, chunkSize * 2)
-                            const firstIndex = normalizedNodeText.indexOf(firstChunk)
-                            const secondIndex = normalizedNodeText.indexOf(secondChunk)
-                            if (firstIndex >= 0 && secondIndex >= 0 && secondIndex > firstIndex) {
-                              const startOriginal = indexMap[firstIndex] ?? 0
-                              const lastOriginal = indexMap[Math.min(secondIndex + secondChunk.length - 1, indexMap.length - 1)] ?? nodeText.length - 1
-                              const matchedOriginal = nodeText.substring(startOriginal, lastOriginal + 1)
-                              if (matchedOriginal.length >= normalizedSearchText.length * 0.6) {
-                                return { found: true, startIndex: startOriginal, matchedText: matchedOriginal }
-                              }
-                            }
-                          }
-                          return { found: false, startIndex: -1, matchedText: '' }
-                        }
-
-                        // Approach 1: TreeWalker ile gelişmiş eşleşme
-                        const walker = iframeDoc.createTreeWalker(
-                          iframeDoc.body,
-                          NodeFilter.SHOW_TEXT,
-                          null
-                        )
-                        
-                        let node
-                        while (node = walker.nextNode() && !foundAndHighlighted) {
-                          if (node.textContent) {
-                            const matchResult = findTextInNode(node.textContent, highlight.selected_text)
-                            if (matchResult.found) {
-                              console.log(`Text node bulundu: "${node.textContent.substring(0, 100)}..."`)
-                              const parent = node.parentElement
-                              if (parent && !parent.querySelector(`.${highlightClass}`)) {
-                                // Inline text highlighting
-                                try {
-                                  const text = node.textContent
-                                  const startIndex = matchResult.startIndex
-                                  const matchedText = matchResult.matchedText
-                                  
-                                  if (startIndex >= 0) {
-                                    const before = text.substring(0, startIndex)
-                                    const highlightText = matchedText
-                                    const after = text.substring(startIndex + highlightText.length)
-                                  
-                                  const fragment = iframeDoc.createDocumentFragment()
-                                  
-                                  if (before) {
-                                    fragment.appendChild(iframeDoc.createTextNode(before))
-                                  }
-                                  
-                                  const span = iframeDoc.createElement('span')
-                                  span.className = highlightClass
-                                  span.textContent = highlightText
-                                  span.setAttribute('data-highlight-id', highlight.id)
-                                  span.setAttribute('data-highlight-text', highlight.selected_text)
-                                  span.style.cursor = 'pointer'
-                                  
-                                  // Highlight'a tıklama event'i ekle
-                                  span.addEventListener('click', (e: Event) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    console.log('Highlight span tıklandı:', highlight.id, highlight.selected_text)
-                                      
-                                    // Highlight panel'ini aç
-                                    setShowHighlights(true)
-                                      
-                                    // Haptic feedback
-                                    if (haptics) {
-                                      haptics.impact({ style: 'light' }).catch(() => {})
-                                    }
-                                  })
-                                  
-                                  fragment.appendChild(span)
-                                  
-                                  if (after) {
-                                    fragment.appendChild(iframeDoc.createTextNode(after))
-                                  }
-                                  
-                                    parent.replaceChild(fragment, node)
-                                    foundAndHighlighted = true
-                                    console.log(`Text node highlight başarılı`)
-                                  }
-                                } catch (nodeError) {
-                                  console.log('Text node highlight hatası:', nodeError)
-                                }
-                              }
-                            }
-                          }
-                        }
-                        
-                        // Approach 2: Eğer tam eşleşme bulunamazsa, basit DOM query
-                        if (!foundAndHighlighted) {
-                          console.log(`TreeWalker başarısız, DOM query deneniyor...`)
-                          try {
-                            // Tüm text node'ları topla
-                            const textNodes: Node[] = []
-                            const collectTextNodes = (element: Node) => {
-                              if (element.nodeType === Node.TEXT_NODE) {
-                                textNodes.push(element)
-                              } else {
-                                element.childNodes.forEach(collectTextNodes)
-                              }
-                            }
-                            collectTextNodes(iframeDoc.body)
-                            
-                            console.log(`${textNodes.length} text node bulundu`)
-                            
-                            for (const textNode of textNodes) {
-                              if (textNode.textContent) {
-                                const matchResult = findTextInNode(textNode.textContent, highlight.selected_text)
-                                if (matchResult.found) {
-                                  console.log(`DOM query ile text bulundu: "${textNode.textContent.substring(0, 50)}..."`)
-                                  const parent = textNode.parentElement
-                                  if (parent && !parent.querySelector(`.${highlightClass}`)) {
-                                    const text = textNode.textContent
-                                    const startIndex = matchResult.startIndex
-                                    const matchedText = matchResult.matchedText
-                                  
-                                    if (startIndex >= 0) {
-                                      const before = text.substring(0, startIndex)
-                                      const highlightText = matchedText
-                                      const after = text.substring(startIndex + highlightText.length)
-                                      
-                                      const fragment = iframeDoc.createDocumentFragment()
-                                      
-                                      if (before) fragment.appendChild(iframeDoc.createTextNode(before))
-                                      
-                                      const span = iframeDoc.createElement('span')
-                                      span.className = highlightClass
-                                      span.textContent = highlightText
-                                      span.setAttribute('data-highlight-id', highlight.id)
-                                      span.setAttribute('data-highlight-text', highlight.selected_text)
-                                      span.style.cursor = 'pointer'
-                                      
-                                      // Highlight'a tıklama event'i ekle
-                                      span.addEventListener('click', (e: Event) => {
-                                        e.preventDefault()
-                                        e.stopPropagation()
-                                        console.log('Highlight span tıklandı:', highlight.id, highlight.selected_text)
-                                        
-                                        // Highlight panel'ini aç
-                                        setShowHighlights(true)
-                                        
-                                        // Haptic feedback
-                                        if (haptics) {
-                                          haptics.impact({ style: 'light' }).catch(() => {})
-                                        }
-                                      })
-                                      
-                                      fragment.appendChild(span)
-                                      
-                                      if (after) fragment.appendChild(iframeDoc.createTextNode(after))
-                                      
-                                      parent.replaceChild(fragment, textNode)
-                                      foundAndHighlighted = true
-                                      console.log(`DOM query highlight başarılı`)
-                                      break
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          } catch (domError) {
-                            console.log('DOM query hatası:', domError)
-                          }
-                        }
-                        
-                        if (foundAndHighlighted) {
-                          console.log(`✅ Highlight ${highlight.id} CSS ile eklendi`)
-                        } else {
-                          console.log(`⚠️ Highlight ${highlight.id} tüm yöntemler başarısız`)
-                        }
-                      } else {
-                        console.log(`⚠️ iframe ${iframeIndex}'de text bulunamadı`)
-                      }
-                    }
-                  } catch (cssError) {
-                    console.log('CSS highlight hatası:', cssError)
-                  }
-                })
-              } catch (generalError) {
-                console.error('CSS highlight genel hatası:', generalError)
-              }
-            }, isIOSFormat ? 1200 : 500) // iOS için daha uzun bekle
+            applyCssHighlight(highlight)
           }
-          
+
+          // ... existing code ...
         } catch (error) {
-          console.error(`Highlight ${index + 1} genel render hatası:`, error, highlight)
+          console.error('Highlight render hatası:', error)
         }
       })
       
@@ -1078,11 +924,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           updated_at: new Date().toISOString()
         }
         setHighlights([...highlights, newHighlight])
-        showToastMessage('Vurgulama başarıyla eklendi!', 'success')
+        showToastMessage(t('reader.toasts.highlightAdded'), 'success')
       }
     } catch (error) {
       console.error('Highlight kaydetme hatası:', error)
-      showToastMessage('Vurgulama eklenirken hata oluştu!', 'error')
+      showToastMessage(t('reader.toasts.highlightAddError'), 'error')
     }
 
     setPendingHighlight(null)
@@ -1100,11 +946,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
             ? { ...h, color: color as any, note: note || undefined, updated_at: new Date().toISOString() }
             : h
         ))
-        showToastMessage('Vurgulama başarıyla güncellendi!', 'success')
+        showToastMessage(t('reader.toasts.highlightUpdated'), 'success')
       }
     } catch (error) {
       console.error('Highlight güncelleme hatası:', error)
-      showToastMessage('Vurgulama güncellenirken hata oluştu!', 'error')
+      showToastMessage(t('reader.toasts.highlightUpdateError'), 'error')
     }
 
     setEditingHighlight(null)
@@ -1116,11 +962,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       
       if (success) {
         setHighlights(highlights.filter(h => h.id !== highlightId))
-        showToastMessage('Vurgulama başarıyla silindi!', 'success')
+        showToastMessage(t('reader.toasts.highlightDeleted'), 'success')
       }
     } catch (error) {
       console.error('Highlight silme hatası:', error)
-      showToastMessage('Vurgulama silinirken hata oluştu!', 'error')
+      showToastMessage(t('reader.toasts.highlightDeleteError'), 'error')
     }
   }
 
@@ -1129,12 +975,114 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     setTimeout(() => setShowToast(null), 3000)
   }
 
+  // Seçimleri temizle ve kısa süreli selection event'lerini bastır
+  const clearSelectionsAndSuppress = (suppressMs: number = 500) => {
+    // Bastırma bayrağı
+    suppressNextSelectionRef.current = true
+    setTimeout(() => {
+      suppressNextSelectionRef.current = false
+    }, suppressMs)
+
+    // Ana pencere seçimini temizle ve kullanıcı seçimini geçici olarak devre dışı bırak
+    try {
+      const selection = window.getSelection()
+      if (selection) selection.removeAllRanges()
+      const activeEl = document.activeElement as HTMLElement | null
+      if (activeEl && typeof activeEl.blur === 'function') activeEl.blur()
+      const setUserSelect = (el: HTMLElement | null, value: string) => {
+        if (!el) return
+        ;(el.style as any).webkitUserSelect = value
+        el.style.userSelect = value
+      }
+      setUserSelect(document.documentElement, 'none')
+      setUserSelect(document.body, 'none')
+      setTimeout(() => {
+        setUserSelect(document.documentElement, '')
+        setUserSelect(document.body, '')
+      }, 350)
+    } catch {}
+
+    // iframe'lerdeki seçimleri temizle ve user-select'i geçici olarak kapat
+    const iframes = document.querySelectorAll('.react-reader-container iframe')
+    iframes.forEach((iframe: any) => {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
+        if (iframeDoc) {
+          const sel = iframeDoc.getSelection()
+          if (sel) sel.removeAllRanges()
+          const activeEl = iframeDoc.activeElement as HTMLElement | null
+          if (activeEl && typeof (activeEl as any).blur === 'function') (activeEl as any).blur()
+          const setUserSelect = (el: HTMLElement | null, value: string) => {
+            if (!el) return
+            ;(el.style as any).webkitUserSelect = value
+            el.style.userSelect = value
+          }
+          setUserSelect(iframeDoc.documentElement, 'none')
+          setUserSelect(iframeDoc.body, 'none')
+          setTimeout(() => {
+            setUserSelect(iframeDoc.documentElement, '')
+            setUserSelect(iframeDoc.body, '')
+          }, 350)
+        }
+      } catch {}
+    })
+  }
+
+  // Context menu handlers
+  const handleHighlightFromContext = () => {
+    // Önce context menüyü kapat
+    setShowContextMenu(false)
+
+    // Son seçilen metni hatırla (aynı seçimde tekrar menü açılmasını engelle)
+    if (pendingHighlight?.selectedText) {
+      setLastSelectedText(pendingHighlight.selectedText)
+    }
+
+    // Tüm seçimleri temizle ve selection event'ini kısa süre bastır
+    clearSelectionsAndSuppress(500)
+
+    // Ardından highlight modalını aç
+    setShowHighlightModal(true)
+  }
+
+  const handleCopyFromContext = async () => {
+    if (pendingHighlight?.selectedText) {
+      try {
+        await navigator.clipboard.writeText(pendingHighlight.selectedText)
+        showToastMessage(t('reader.toasts.copySuccess'), 'success')
+      } catch (error) {
+        console.error('Copy error:', error)
+        showToastMessage(t('reader.toasts.copyError'), 'error')
+      }
+    }
+    setShowContextMenu(false)
+    setPendingHighlight(null)
+  }
+
+  const handleSearchFromContext = () => {
+    if (pendingHighlight?.selectedText) {
+      const searchQuery = encodeURIComponent(pendingHighlight.selectedText)
+      window.open(`https://www.google.com/search?q=${searchQuery}`, '_blank')
+      showToastMessage(t('reader.toasts.searchOpened'), 'info')
+    }
+    setShowContextMenu(false)
+    setPendingHighlight(null)
+  }
+
+  const handleCloseContextMenu = () => {
+    setShowContextMenu(false)
+    setPendingHighlight(null)
+
+    // Tüm seçimleri temizle ve selection event'ini kısa süre bastır
+    clearSelectionsAndSuppress(500)
+  }
+
   const handleHighlightClick = (highlight: Highlight) => {
     if (renditionRef.current) {
       console.log('Highlight tıklandı:', highlight)
       
       // Toast mesajı göster
-      showToastMessage(`"${highlight.selected_text.substring(0, 50)}${highlight.selected_text.length > 50 ? '...' : ''}" konumuna gidiliyor...`, 'info')
+      showToastMessage(t('reader.toasts.navigatingTo', { quote: `${highlight.selected_text.substring(0, 50)}${highlight.selected_text.length > 50 ? '...' : ''}` }), 'info')
       
       try {
         // CFI range'i temizle ve parse et
@@ -1793,6 +1741,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       
       // iOS için basit ve etkili text selection handler
       const handleIOSSelection = () => {
+        // Eğer bastırma bayrağı aktifse, bu selection event'ini yok say
+        if (suppressNextSelectionRef.current) {
+          console.log('iOS selection event bastırıldı')
+          return
+        }
+        
         setTimeout(() => {
           try {
             // Tüm iframe'leri kontrol et
@@ -1803,7 +1757,15 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 if (iframeDoc) {
                   const selection = iframeDoc.getSelection()
                   if (selection && selection.toString().trim().length > 0) {
-                    console.log('iOS selection detected:', selection.toString())
+                    const selectedText = selection.toString().trim()
+                    
+                    // Aynı metin tekrar seçilmişse menüyü açma
+                    if (selectedText === lastSelectedText) {
+                      console.log('iOS: Aynı metin tekrar seçildi, menü açılmıyor')
+                      return
+                    }
+                    
+                    console.log('iOS selection detected:', selectedText)
                     
                     // Haptic feedback
                     if (haptics) {
@@ -1829,7 +1791,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                         cfiRange = 'epubcfi(/6/0):' + range.startOffset + ',' + range.endOffset
                       }
                       
-                      const selectedText = selection.toString().trim()
                       if (selectedText && selectedText.length > 0) {
                         console.log('iOS selected text:', selectedText, 'CFI:', cfiRange)
                         
@@ -1841,18 +1802,24 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                           selectedText,
                           chapterTitle
                         })
-                        setShowHighlightModal(true)
                         
-                        // Seçimi temizle
-                        selection.removeAllRanges()
+                        // Son seçilen metni kaydet
+                        setLastSelectedText(selectedText)
+                        
+                        // Context menu için pozisyonu hesapla (iframe ofsetini dikkate al)
+                        const rect = range.getBoundingClientRect()
+                        const iframeRect = (iframe as HTMLIFrameElement).getBoundingClientRect()
+                        const x = iframeRect.left + (rect.left + rect.width / 2)
+                        const y = iframeRect.top + rect.bottom + 10
+                        setContextMenuPosition({ x, y })
+                        setShowContextMenu(true)
                       }
                     } catch (error) {
                       console.error('iOS CFI range oluşturma hatası:', error)
                       
                       // Hata durumunda basit highlight oluştur
-                      const selectedText = selection.toString().trim()
                       if (selectedText && selectedText.length > 0) {
-                        console.log('Fallback iOS highlight:', selectedText)
+                        console.log('Fallback iOS selection:', selectedText)
                         
                         const chapterTitle = currentChapter || ''
                         
@@ -1861,9 +1828,20 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                           selectedText,
                           chapterTitle
                         })
-                        setShowHighlightModal(true)
                         
-                        selection.removeAllRanges()
+                        // Son seçilen metni kaydet
+                        setLastSelectedText(selectedText)
+                        
+                        // Pozisyonu range üzerinden hesapla
+                        try {
+                          const range = selection.getRangeAt(0)
+                          const rect = range.getBoundingClientRect()
+                          const iframeRect = (iframe as HTMLIFrameElement).getBoundingClientRect()
+                          const x = iframeRect.left + (rect.left + rect.width / 2)
+                          const y = iframeRect.top + rect.bottom + 10
+                          setContextMenuPosition({ x, y })
+                        } catch {}
+                        setShowContextMenu(true)
                       }
                     }
                   }
@@ -1924,7 +1902,67 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         })
       }
     }
-  }, [currentChapter])
+  }, [currentChapter, lastSelectedText])
+
+  const isCapacitor = typeof window !== 'undefined' && (window as any).Capacitor
+  const isAndroidDevice = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+  const isIOSDeviceMenu = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+  const isMobileCap = isCapacitor && (isAndroidDevice || isIOSDeviceMenu)
+
+  const handleSpeakFromContext = async () => {
+    try {
+      const text = pendingHighlight?.selectedText?.trim()
+      if (!text) return
+      if (!tts) {
+        showToastMessage(t('reader.toasts.ttsNotAvailable'), 'error')
+        return
+      }
+      // iOS/Android için basit TTS
+      await tts.speak({
+        text,
+        lang: ttsLanguage || 'tr-TR',
+        rate: 1.0,
+        pitch: 1.0,
+        volume: 1.0,
+        category: 'ambient'
+      })
+      showToastMessage(t('reader.toasts.ttsStarted'), 'info')
+    } catch (err) {
+      console.error('TTS speak error:', err)
+      showToastMessage(t('reader.toasts.ttsStartError'), 'error')
+    } finally {
+      setShowContextMenu(false)
+    }
+  }
+
+  // Toast enter animation (slide-in from right)
+  useEffect(() => {
+    if (showToast) {
+      setToastEnter(false)
+      const id = setTimeout(() => setToastEnter(true), 30)
+      return () => clearTimeout(id)
+    } else {
+      setToastEnter(false)
+    }
+  }, [showToast])
+
+  // Load and persist TTS language
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('ttsLanguage')
+      if (saved) {
+        setTtsLanguage(saved)
+      } else if (typeof navigator !== 'undefined' && navigator.language) {
+        setTtsLanguage(navigator.language)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      if (ttsLanguage) localStorage.setItem('ttsLanguage', ttsLanguage)
+    } catch {}
+  }, [ttsLanguage])
 
   if (isLoading) {
     return (
@@ -2123,6 +2161,27 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                         <Highlighter className="w-4 h-4" />
                         <span>Vurgulamalar ({highlights.length})</span>
                       </button>
+                      
+                      <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
+                      
+                      {/* TTS Language */}
+                      <div className="px-3 py-2">
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                          {t('reader.speechLanguage')}
+                        </label>
+                        <select
+                          value={ttsLanguage}
+                          onChange={(e) => setTtsLanguage(e.target.value)}
+                          className="w-full text-sm px-2 py-1.5 rounded-lg border border-gray-200 dark:border-dark-700 bg-white/80 dark:bg-dark-800/80 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-500/50"
+                        >
+                          <option value="tr-TR">Türkçe (TR)</option>
+                          <option value="en-US">English (US)</option>
+                          <option value="en-GB">English (UK)</option>
+                          <option value="de-DE">Deutsch (DE)</option>
+                          <option value="es-ES">Español (ES)</option>
+                          <option value="ar-SA">العربية (SA)</option>
+                        </select>
+                      </div>
                       
                       <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
                       
@@ -2378,7 +2437,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         {blobUrl ? (
           <div className={`w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${
             isFullscreen ? 'fullscreen' : ''
-          }`}>
+          } ${!isFullscreen ? 'md:pb-8' : ''}`}>
             <ReactReader
               url={blobUrl}
               location={location}
@@ -2456,7 +2515,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       </div>
 
       {/* Bottom Status Bar - Kompakt */}
-      <div className={`hidden md:block bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border-t border-white/30 dark:border-dark-700/30 transition-all duration-300 ${
+      <div className={`hidden md:block fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-white/30 dark:border-dark-700/30 transition-all duration-300 z-10 ${
         isFullscreen ? 'hidden' : ''
       }`}>
         <div className="max-w-7xl mx-auto px-4 py-1.5">
@@ -2509,20 +2568,93 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         isEditing={!!editingHighlight}
       />
 
+      {/* Context Menu */}
+      <ContextMenu
+        show={showContextMenu}
+        x={contextMenuPosition.x}
+        y={contextMenuPosition.y}
+        selectedText={pendingHighlight?.selectedText || ''}
+        onHighlight={handleHighlightFromContext}
+        onCopy={handleCopyFromContext}
+        onSearch={handleSearchFromContext}
+        onClose={handleCloseContextMenu}
+        onSpeak={isMobileCap ? handleSpeakFromContext : undefined}
+        isTtsAvailable={isMobileCap}
+      />
+
       {/* Toast Notification */}
       {showToast && (
-        <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 rounded-lg shadow-lg transition-all duration-300 ${
-          showToast.type === 'success' 
-            ? 'bg-green-500 text-white' 
-            : showToast.type === 'error' 
-            ? 'bg-red-500 text-white' 
-            : 'bg-blue-500 text-white'
-        }`}>
-          <div className="flex items-center gap-2">
-            {showToast.type === 'success' && <span>✅</span>}
-            {showToast.type === 'error' && <span>❌</span>}
-            {showToast.type === 'info' && <span>ℹ️</span>}
-            <span className="text-sm font-medium">{showToast.message}</span>
+        <div className="fixed top-32 right-6 z-[60] pointer-events-none">
+          <div className={`pointer-events-auto transform transition-all duration-500 ease-out ${toastEnter ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-6'}`}>
+            <div className={`
+              relative overflow-hidden w-[260px] sm:w-[300px]
+              bg-white/85 dark:bg-dark-900/85 
+              backdrop-blur-xl border border-white/20 dark:border-dark-700/30
+              rounded-xl shadow-2xl ring-1 ring-black/5 dark:ring-white/5
+              ${showToast.type === 'success' 
+                ? 'bg-gradient-to-br from-emerald-50/70 to-green-50/70 dark:from-emerald-950/50 dark:to-green-950/50' 
+                : showToast.type === 'error' 
+                ? 'bg-gradient-to-br from-red-50/70 to-rose-50/70 dark:from-red-950/50 dark:to-rose-950/50'
+                : 'bg-gradient-to-br from-blue-50/70 to-indigo-50/70 dark:from-blue-950/50 dark:to-indigo-950/50'
+              }
+            `}>
+              {/* Accent Border */}
+              <div className={`absolute inset-y-0 left-0 w-[2px] ${
+                showToast.type === 'success' 
+                  ? 'bg-gradient-to-b from-emerald-500 to-green-600' 
+                  : showToast.type === 'error' 
+                  ? 'bg-gradient-to-b from-red-500 to-rose-600'
+                  : 'bg-gradient-to-b from-blue-500 to-indigo-600'
+              }`} />
+              
+              <div className="p-2.5 pl-4">
+                <div className="flex items-start gap-2">
+                  <div className="flex-shrink-0">
+                    {showToast.type === 'success' && (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    )}
+                    {showToast.type === 'error' && (
+                      <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+                    )}
+                    {showToast.type === 'info' && (
+                      <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 pt-0.5">
+                    <p className="text-[12px] font-semibold text-gray-900 dark:text-gray-100">
+                      {showToast.type === 'success' && t('reader.toastTitles.success')}
+                      {showToast.type === 'error' && t('reader.toastTitles.error')}
+                      {showToast.type === 'info' && t('reader.toastTitles.info')}
+                    </p>
+                    <p className="text-[12px] text-gray-700 dark:text-gray-300 mt-0.5 leading-relaxed">
+                      {showToast.message}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setShowToast(null)}
+                    className="flex-shrink-0 p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-md hover:bg-gray-100/70 dark:hover:bg-dark-800/70 transition-colors"
+                    aria-label={t('common.close')}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="h-px w-full bg-gray-200/30 dark:bg-dark-700/30">
+                <div
+                  className={`h-full transition-all duration-[3000ms] ease-linear ${
+                    showToast.type === 'success' 
+                      ? 'bg-gradient-to-r from-emerald-500 to-green-500' 
+                      : showToast.type === 'error' 
+                      ? 'bg-gradient-to-r from-red-500 to-rose-500'
+                      : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                  }`}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}

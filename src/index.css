@@ -118,9 +118,9 @@ body {
 
 /* Yükseklik ayarlamaları */
 .react-reader-container {
-  height: calc(100vh - 140px) !important;
-  min-height: calc(100vh - 140px) !important;
-  max-height: calc(100vh - 140px) !important;
+  height: calc(100vh - 90px) !important;
+  min-height: calc(100vh - 90px) !important;
+  max-height: calc(100vh - 90px) !important;
 }
 
 .react-reader-container.fullscreen {

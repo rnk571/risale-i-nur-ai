@@ -86,8 +86,37 @@
     "pageShort": "Sayfa",
     "paragraph": "Paragraf",
     "bookmark": "Yer İşareti",
-    "toc": "İçindekiler"
+    "toc": "İçindekiler",
+    "highlight": "Vurgula",
+    "copy": "Kopyala",
+    "search": "Ara",
+    "speak": "Seslendir",
+    "speechLanguage": "Seslendirme Dili",
+    "toastTitles": {
+      "success": "Başarılı",
+      "error": "Hata",
+      "info": "Bilgi"
+    },
+    "toasts": {
+      "highlightAdded": "Vurgulama başarıyla eklendi!",
+      "highlightAddError": "Vurgulama eklenirken hata oluştu!",
+      "highlightUpdated": "Vurgulama başarıyla güncellendi!",
+      "highlightUpdateError": "Vurgulama güncellenirken hata oluştu!",
+      "highlightDeleted": "Vurgulama başarıyla silindi!",
+      "highlightDeleteError": "Vurgulama silinirken hata oluştu!",
+      "copySuccess": "Metin kopyalandı!",
+      "copyError": "Kopyalama başarısız!",
+      "searchOpened": "Arama açıldı!",
+      "navigatingTo": "\"{{quote}}\" konumuna gidiliyor...",
+      "ttsNotAvailable": "Seslendirme desteği bulunamadı",
+      "ttsStarted": "Seslendirme başladı",
+      "ttsStartError": "Seslendirme başlatılamadı"
+    }
   },
+  "highlight": "Vurgula",
+  "copy": "Kopyala",
+  "search": "Ara",
+  "speak": "Seslendir",
   "profile": {
     "title": "Profilim",
     "subtitle": "Hesap bilgilerinizi görüntüleyin ve yönetin",
