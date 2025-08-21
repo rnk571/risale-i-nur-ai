@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { supabase, type Book } from '../lib/supabase'
-import { Upload, Plus, Trash2, Edit, Eye, EyeOff, BookOpen, Settings, Users, Search, ArrowLeft, X, ChevronDown, SlidersHorizontal, RotateCcw } from 'lucide-react'
+import { Upload, Plus, Trash2, Edit, Eye, EyeOff, BookOpen, Settings, Users, Search, ArrowLeft, X, ChevronDown } from 'lucide-react'
+import { BookFilters, defaultFilters, type FilterState } from './BookFilters'
+import { filterAndSortBooks } from '../utils/bookFilters'
 
 interface AdminPanelProps {
   onBackToLibrary: () => void
@@ -235,63 +237,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Filtre state'leri
-  const [filters, setFilters] = useState({
-    status: 'all' as 'all' | 'active' | 'inactive',
-    language: 'all' as 'all' | 'tr' | 'en',
-    format: 'all' as 'all' | 'epub' | 'pdf',
-    accessType: 'all' as 'all' | 'public' | 'private',
-    sortBy: 'created_desc' as 'created_desc' | 'created_asc' | 'title_asc' | 'title_desc' | 'author_asc' | 'author_desc'
-  })
+  const [filters, setFilters] = useState<FilterState>(defaultFilters)
   const [showFilters, setShowFilters] = useState(false)
 
   // Gelişmiş filtreleme ve sıralama
-  const filteredBooks = books
-    .filter(book => {
-      // Arama terimi filtresi
-      const matchesSearch = !searchTerm || 
-        book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        book.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (book.description && book.description.toLowerCase().includes(searchTerm.toLowerCase()))
-
-      // Durum filtresi
-      const matchesStatus = filters.status === 'all' ||
-        (filters.status === 'active' && book.is_active) ||
-        (filters.status === 'inactive' && !book.is_active)
-
-      // Dil filtresi
-      const matchesLanguage = filters.language === 'all' ||
-        book.language === filters.language
-
-      // Format filtresi
-      const filePath = (book as any).epub_file_path || ''
-      const bookFormat: 'epub' | 'pdf' = (typeof filePath === 'string' && filePath.toLowerCase().endsWith('.pdf')) ? 'pdf' : 'epub'
-      const matchesFormat = filters.format === 'all' || bookFormat === filters.format
-
-      // Erişim türü filtresi
-      const matchesAccessType = filters.accessType === 'all' ||
-        (filters.accessType === 'public' && book.is_public) ||
-        (filters.accessType === 'private' && !book.is_public)
-
-      return matchesSearch && matchesStatus && matchesLanguage && matchesFormat && matchesAccessType
-    })
-    .sort((a, b) => {
-      switch (filters.sortBy) {
-        case 'created_asc':
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        case 'created_desc':
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        case 'title_asc':
-          return a.title.localeCompare(b.title, 'tr')
-        case 'title_desc':
-          return b.title.localeCompare(a.title, 'tr')
-        case 'author_asc':
-          return a.author.localeCompare(b.author, 'tr')
-        case 'author_desc':
-          return b.author.localeCompare(a.author, 'tr')
-        default:
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      }
-    })
+  const filteredBooks = filterAndSortBooks(books, searchTerm, filters)
 
   // localStorage'a durumları kaydet
   useEffect(() => {
@@ -953,159 +903,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         {/* Books List */}
         <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-xl rounded-3xl border border-gray-200 dark:border-dark-700/30 shadow-xl overflow-hidden">
           <div className="p-6 border-b border-white/30 dark:border-dark-600/30">
-            <div className="space-y-4">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{t('admin.listTitle')}</h2>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
-                    ({filteredBooks.length} / {books.length} {t('admin.stats.totalBooks').toLowerCase()})
-                  </span>
-                </div>
-                
-                {/* Arama ve Filtre - Desktop'ta yan yana */}
-                <div className="flex flex-col sm:flex-row gap-3 lg:items-center">
-                  {/* Arama Barı */}
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-3 flex items-center">
-                      <Search className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-                    </div>
-                    <input
-                      type="text"
-                      placeholder={t('admin.searchPlaceholder')}
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full sm:w-80 pl-10 pr-10 py-3 bg-white/60 dark:bg-dark-700/60 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 shadow-lg hover:shadow-xl focus:shadow-xl"
-                    />
-                    {searchTerm && (
-                      <button
-                        onClick={() => setSearchTerm('')}
-                        className="absolute inset-y-0 right-3 flex items-center text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                        title={t('admin.clearSearch')}
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Filtre Toggle */}
-                  <button
-                    onClick={() => setShowFilters(!showFilters)}
-                    className={`flex items-center gap-2 px-4 py-3 rounded-xl transition-all duration-200 whitespace-nowrap ${
-                      showFilters 
-                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' 
-                        : 'bg-white/60 dark:bg-dark-700/60 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600/60'
-                    } border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl`}
-                  >
-                    <SlidersHorizontal className="w-4 h-4" />
-                    <span className="text-sm font-medium">{t('admin.filters')}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Filtreler */}
-              <div className="space-y-4">
-
-                {/* Filtreler */}
-                {showFilters && (
-                  <div className="bg-white/60 dark:bg-dark-700/60 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 rounded-xl p-4 shadow-lg">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                      {/* Durum Filtresi */}
-                      <div>
-                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('admin.filter.status')}</label>
-                        <select
-                          value={filters.status}
-                          onChange={(e) => setFilters({...filters, status: e.target.value as any})}
-                          className="w-full px-3 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                        >
-                           <option value="all">{t('admin.filter.statusAll')}</option>
-                           <option value="active">{t('admin.filter.statusActive')}</option>
-                           <option value="inactive">{t('admin.filter.statusInactive')}</option>
-                        </select>
-                      </div>
-
-                       {/* Format Filtresi */}
-                       <div>
-                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('admin.filter.format')}</label>
-                         <select
-                           value={filters.format}
-                           onChange={(e) => setFilters({...filters, format: e.target.value as any})}
-                           className="w-full px-3 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                         >
-                           <option value="all">{t('admin.filter.formatAll')}</option>
-                           <option value="epub">EPUB</option>
-                           <option value="pdf">PDF</option>
-                         </select>
-                       </div>
-
-                      {/* Dil Filtresi */}
-                      <div>
-                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('admin.filter.language')}</label>
-                        <select
-                          value={filters.language}
-                          onChange={(e) => setFilters({...filters, language: e.target.value as any})}
-                          className="w-full px-3 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                        >
-                           <option value="all">{t('admin.filter.langAll')}</option>
-                           <option value="tr">{t('admin.filter.langTr')}</option>
-                           <option value="en">{t('admin.filter.langEn')}</option>
-                        </select>
-                      </div>
-
-                      {/* Erişim Türü */}
-                      <div>
-                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('admin.filter.access')}</label>
-                        <select
-                          value={filters.accessType}
-                          onChange={(e) => setFilters({...filters, accessType: e.target.value as any})}
-                          className="w-full px-3 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                        >
-                           <option value="all">{t('admin.filter.langAll')}</option>
-                           <option value="public">{t('admin.filter.accessPublic')}</option>
-                           <option value="private">{t('admin.filter.accessPrivate')}</option>
-                        </select>
-                      </div>
-
-                      {/* Sıralama */}
-                      <div>
-                         <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('admin.filter.sort')}</label>
-                        <select
-                          value={filters.sortBy}
-                          onChange={(e) => setFilters({...filters, sortBy: e.target.value as any})}
-                          className="w-full px-3 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
-                        >
-                           <option value="created_desc">{t('admin.filter.sortNewest')}</option>
-                           <option value="created_asc">{t('admin.filter.sortOldest')}</option>
-                           <option value="title_asc">{t('admin.filter.sortTitleAsc')}</option>
-                           <option value="title_desc">{t('admin.filter.sortTitleDesc')}</option>
-                           <option value="author_asc">{t('admin.filter.sortAuthorAsc')}</option>
-                           <option value="author_desc">{t('admin.filter.sortAuthorDesc')}</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Filtreleri Temizle */}
-                    <div className="flex justify-end mt-4 pt-3 border-t border-gray-200 dark:border-dark-600">
-                       <button
-                        onClick={() => {
-                          setFilters({
-                            status: 'all',
-                            language: 'all',
-                            format: 'all',
-                            accessType: 'all',
-                            sortBy: 'created_desc'
-                          })
-                          setSearchTerm('')
-                        }}
-                        className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                         {t('admin.filter.reset')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            <BookFilters
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              filters={filters}
+              onFiltersChange={setFilters}
+              showFilters={showFilters}
+              onToggleFilters={() => setShowFilters(!showFilters)}
+              totalCount={books.length}
+              filteredCount={filteredBooks.length}
+              showStatusFilter={true}
+              className="mb-4"
+            />
           </div>
           
           {/* Desktop Table View */}

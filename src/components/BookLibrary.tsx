@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { supabase, type Book } from '../lib/supabase'
-import { BookOpen, Search } from 'lucide-react'
+import { BookOpen } from 'lucide-react'
+import { BookFilters, defaultFilters, type FilterState } from './BookFilters'
+import { filterAndSortBooks } from '../utils/bookFilters'
 
 interface BookLibraryProps {
   onBookSelect: (book: Book) => void
@@ -15,6 +17,8 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
   const [books, setBooks] = useState<Book[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [filters, setFilters] = useState<FilterState>(defaultFilters)
+  const [showFilters, setShowFilters] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -43,10 +47,8 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
     }
   }
 
-  const filteredBooks = books.filter(book =>
-    book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    book.author.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  // Filtreleme ve sıralama - kullanıcılar sadece aktif kitapları görür
+  const filteredBooks = filterAndSortBooks(books, searchTerm, filters)
 
   if (loading) {
     return (
@@ -80,29 +82,29 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
       <div className="max-w-7xl mx-auto p-6 pt-8">
         {/* Hero Section */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-6">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-4">
             {t('library.title')}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-8">
             {t('library.subtitle')}
           </p>
-          
-          {/* Search Bar */}
-          <div className="relative max-w-lg mx-auto">
-            <div className="absolute inset-y-0 left-4 flex items-center">
-              <Search className="w-5 h-5 text-gray-400 dark:text-gray-500" />
-            </div>
-            <input
-              type="text"
-              placeholder={t('library.searchPlaceholder')}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-6 py-4 bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-lg text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200"
+        </div>
+
+        {/* Filters Section */}
+        <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-xl rounded-3xl border border-gray-200 dark:border-dark-700/30 shadow-xl overflow-hidden mb-8">
+          <div className="p-6">
+            <BookFilters
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              filters={filters}
+              onFiltersChange={setFilters}
+              showFilters={showFilters}
+              onToggleFilters={() => setShowFilters(!showFilters)}
+              totalCount={books.length}
+              filteredCount={filteredBooks.length}
+              showStatusFilter={false}
             />
-            <div className="absolute inset-y-0 right-4 flex items-center">
-              <div className="w-2 h-2 bg-blue-400 dark:bg-blue-300 rounded-full opacity-50"></div>
-            </div>
           </div>
         </div>
 
@@ -139,9 +141,12 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
               <p className="text-gray-600 dark:text-gray-400 mb-6">
                 {searchTerm ? t('library.notFoundSubtitle') : t('library.emptySubtitle')}
               </p>
-              {searchTerm && (
+              {(searchTerm || showFilters) && (
                 <button
-                  onClick={() => setSearchTerm('')}
+                  onClick={() => {
+                    setSearchTerm('')
+                    setFilters(defaultFilters)
+                  }}
                   className="px-6 py-2 bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-xl"
                 >
                   {t('library.clearSearch')}
