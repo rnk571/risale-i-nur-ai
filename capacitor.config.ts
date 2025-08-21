@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.example.ebookreader',
-  appName: 'Elektronik Kitap Okuyucu',
+  appId: 'com.mithat.biblionary',
+  appName: 'Biblionary',
   webDir: 'dist',
   server: {
     androidScheme: 'https'
@@ -20,7 +20,7 @@ const config: CapacitorConfig = {
   },
   ios: {
     // iOS özel ayarları
-    scheme: 'ebookreader',
+    scheme: 'biblionary',
     limitsNavigationsToAppBoundDomains: false,
     webContentsDebuggingEnabled: true
   }

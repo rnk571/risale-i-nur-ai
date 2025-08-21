@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '../lib/supabase'
-import { BookOpen, Mail, Lock, AlertCircle } from 'lucide-react'
+import { Mail, Lock, AlertCircle } from 'lucide-react'
 
 interface AuthProps {
   onAuthSuccess: () => void
@@ -82,9 +82,11 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
           {/* Logo Section */}
           <div className="text-center mb-8">
             <div className="relative mx-auto w-16 h-16 mb-6">
-              <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
-                <BookOpen className="h-8 w-8 text-white" />
-              </div>
+              <img 
+                src="/logo-512.png" 
+                alt="App Logo" 
+                className="w-16 h-16 rounded-2xl shadow-lg object-cover"
+              />
               <div className="absolute -top-2 -right-2 w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center">
                 <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
               </div>
