@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Highlighter, Copy, Search, Volume2 } from 'lucide-react'
+import { Highlighter, Copy, Search, Volume2, X } from 'lucide-react'
 
 interface ContextMenuProps {
   show: boolean
@@ -59,16 +59,16 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
   return (
     <>
-      {/* Backdrop */}
-      <div 
+      {/* Backdrop - sadece görsel, etkileşim yok (seçim handle'larını bozmasın) */}
+      <div
         className="fixed inset-0 z-40 bg-black/10 backdrop-blur-[1px]"
-        onClick={onClose}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}
       />
       
       {/* Menu */}
       <div 
         className={`
-          fixed z-50 context-menu
+          fixed z-50 context-menu select-none
           bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl
           border border-white/20 dark:border-gray-700/50
           rounded-2xl shadow-2xl ring-1 ring-black/5 dark:ring-white/10
@@ -90,6 +90,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         </div>
         
         <div className="relative">
+          {/* Kapatma butonu (X) - onClose prop'unu kullanır */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-2 top-2 z-10 p-1.5 rounded-full 
+                       text-gray-400 hover:text-gray-600 dark:text-gray-500 
+                       dark:hover:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-gray-800/80
+                       transition-colors duration-150"
+          >
+            <X size={14} />
+          </button>
           {/* Seçilen metin önizlemesi */}
           <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
             <p className={`text-xs text-gray-500 dark:text-gray-400 truncate font-medium ${isMobile ? 'max-w-[240px]' : 'max-w-[200px]'}`}>

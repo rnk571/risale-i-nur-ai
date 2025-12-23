@@ -71,6 +71,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   
   const renditionRef = useRef<any>(null)
   const suppressNextSelectionRef = useRef<boolean>(false)
+  // Android seçim davranışı için timeout ref'i (seçim bitince menü açmak için)
+  const androidSelectionTimeoutRef = useRef<number | null>(null)
+  // iOS seçim durumu için ref'ler
+  const iosIsTouchSelectingRef = useRef<boolean>(false)
+  const iosLastSelectionTextRef = useRef<string>('')
+  const iosLastSelectionChangeTimeRef = useRef<number>(0)
+  const iosMenuShownForSelectionRef = useRef<boolean>(false)
   const tocRef = useRef<any>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   
@@ -94,10 +101,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
   // Sekme görünürlüğü değişiminde agresif yan etkileri devre dışı bıraktık
 
-  // Menü dış tıklamada kapanması için
+  // Menü/paneller dış tıklama veya dokunmada kapansın
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handlePointerOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target as HTMLElement
+      if (!target) return
       
       // Menü için
       if (showMenu && !target.closest('.menu-container')) {
@@ -114,9 +122,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         setShowHighlights(false)
       }
       
-      // Context menu için
+      // Context menu için (iOS'ta text selector handle'larına dokununca da kapanır)
       if (showContextMenu && !target.closest('.context-menu')) {
+        // Dışarı tıklamayla context menü kapanırken, seçimleri de temizle
         setShowContextMenu(false)
+        setPendingHighlight(null)
+        clearSelectionsAndSuppress(500)
       }
       
       // Ayarlar paneli için
@@ -125,8 +136,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('mousedown', handlePointerOutside)
+    document.addEventListener('touchstart', handlePointerOutside)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerOutside)
+      document.removeEventListener('touchstart', handlePointerOutside)
+    }
   }, [showMenu, showBookmarks, showSettings, showHighlights, showContextMenu])
 
   // ESC tuşu ile panelleri kapatma
@@ -140,7 +155,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         } else if (showHighlights) {
           setShowHighlights(false)
         } else if (showContextMenu) {
+          // ESC ile context menü kapanırken de seçimleri temizle
           setShowContextMenu(false)
+          setPendingHighlight(null)
+          clearSelectionsAndSuppress(500)
         } else if (showMenu) {
           setShowMenu(false)
         }
@@ -387,16 +405,58 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     const isAndroid = /Android/i.test(navigator.userAgent)
     const isMobile = isIOS || isAndroid
     
-    // Mobile cihazlar için eski delayli selection handling iOS için global useEffect ile değiştirildi
+    // EPUB içerik iframe'lerine mobil için özel CSS ve event injection
+    if (rendition?.hooks?.content) {
+      try {
+        rendition.hooks.content.register((contents: any) => {
+          try {
+            const doc = contents.document as Document | undefined
+            if (!doc) return
 
-    // Android için basit yaklaşım - iframe event listener'ları kaldırıldı
-    // iOS için özel handling korundu
-    if (isIOS) {
-      console.log('iOS cihaz tespit edildi, global selection handler kullanılacak')
-      // iOS selection handling burada değil, aşağıdaki global useEffect içinde yönetiliyor
+            const head = doc.querySelector('head')
+            if (head) {
+              const style = doc.createElement('style')
+              style.innerHTML = `
+                * {
+                  /* iOS'ta uzun basınca çıkan native menüyü engelle */
+                  -webkit-touch-callout: none !important;
+                  /* Metin seçimine izin ver */
+                  -webkit-user-select: text;
+                  user-select: text;
+                }
+              `
+              head.appendChild(style)
+            }
+
+            // Native context menu'yü kapat (özellikle iOS için)
+            doc.addEventListener('contextmenu', (e) => {
+              e.preventDefault()
+            })
+
+            // EPUB içeriğinde herhangi bir dokunuşta açık context menüyü kapat
+            // (özellikle mobilde text selection handle'larına dokunulduğunda)
+            doc.addEventListener('touchstart', () => {
+              setShowContextMenu(false)
+              setPendingHighlight(null)
+            })
+
+            // Android'de: seçim değiştiği anda context menüyü kapat (seçim yaparken menü pasif olsun)
+            if (isAndroid) {
+              doc.addEventListener('selectionchange', () => {
+                setShowContextMenu(false)
+                setPendingHighlight(null)
+              })
+            }
+          } catch (err) {
+            console.log('EPUB content hook hatası:', err)
+          }
+        })
+      } catch (err) {
+        console.log('rendition.hooks.content.register hatası:', err)
+      }
     }
-
-    // Text selection event listener ekle (desktop ve fallback için)
+    
+    // Text selection event listener ekle (Android + Web için ana mekanizma, iOS için global handler kullanılır)
     rendition.on('selected', (cfiRange: string) => {
       // Eğer bastırma bayrağı aktifse, bu selection event'ini yok say
       if (suppressNextSelectionRef.current) {
@@ -406,6 +466,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       
       try {
         console.log('Text selected:', cfiRange)
+
+        // iOS'ta selection'ı global handler üzerinden yönetiyoruz
+        if (isIOS) {
+          console.log('iOS: rendition selected event alındı, ancak global/polling handler kullanılacak')
+          return
+        }
         const range = rendition.getRange(cfiRange)
         const selectedText = range ? range.toString().trim() : ''
         
@@ -430,34 +496,92 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           // Son seçilen metni kaydet
           setLastSelectedText(selectedText)
           
-          // Android ve Desktop için: seçime göre menüyü konumlandır
+          // Android ve Web'de: seçime göre menüyü konumlandır
           const computeAndShowMenu = () => {
             try {
               const rect = range?.getBoundingClientRect()
               if (rect) {
                 let x = rect.left + rect.width / 2
-                let y = rect.bottom + 10
+                // Menü yüksekliği yaklaşık olarak: 60 (header) + 4*44 (items) + 8 (padding) = ~264px
+                const isMobileView = window.innerWidth < 768
+                const estimatedMenuHeight = isMobileView ? 240 : 264
+                const padding = 10
+
+                // Önce seçimin altına yerleştirmeyi dene
+                let y = rect.bottom + padding
+
                 try {
-                  const iframeEl = ((range as any)?.startContainer as any)?.ownerDocument?.defaultView?.frameElement as HTMLIFrameElement | null
+                  const iframeEl =
+                    ((range as any)?.startContainer as any)?.ownerDocument
+                      ?.defaultView?.frameElement as HTMLIFrameElement | null
                   if (iframeEl) {
                     const iframeRect = iframeEl.getBoundingClientRect()
+                    let globalY = iframeRect.top + y
+
+                    // Eğer ekranın altına taşacaksa, seçimin üstüne yerleştir
+                    if (globalY + estimatedMenuHeight > window.innerHeight - 10) {
+                      y = rect.top - estimatedMenuHeight - padding
+                      // Eğer hala üst kenara çok yakınsa, minimum padding bırak
+                      if (iframeRect.top + y < 10) {
+                        y = 10 - iframeRect.top
+                      }
+                    }
+
                     x = iframeRect.left + x
                     y = iframeRect.top + y
+                  } else {
+                    // iframe yoksa, global koordinatları kullan
+                    let globalY = y
+                    if (globalY + estimatedMenuHeight > window.innerHeight - 10) {
+                      y = rect.top - estimatedMenuHeight - padding
+                      if (y < 10) {
+                        y = 10
+                      }
+                    }
                   }
                 } catch {}
+
                 setContextMenuPosition({ x, y })
               } else {
-                setContextMenuPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+                setContextMenuPosition({
+                  x: window.innerWidth / 2,
+                  y: window.innerHeight / 2
+                })
               }
               setShowContextMenu(true)
             } catch {
-              setContextMenuPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+              setContextMenuPosition({
+                x: window.innerWidth / 2,
+                y: window.innerHeight / 2
+              })
               setShowContextMenu(true)
             }
           }
+          
+          // Platforma göre menüyü ve haptics'i sadece seçim tamamlandığında göster
           if (isAndroid) {
-            setTimeout(computeAndShowMenu, 300)
+            // Android'de: her yeni selection event'inde önce eski timeout'u iptal et
+            if (androidSelectionTimeoutRef.current !== null) {
+              window.clearTimeout(androidSelectionTimeoutRef.current)
+            }
+            // Seçim durulduktan kısa bir süre sonra (parmak kalktıktan sonra) menüyü aç
+            androidSelectionTimeoutRef.current = window.setTimeout(() => {
+              // Son timeout çalışırken, highlight bilgisi hâlâ geçerliyse menüyü göster
+              try {
+                if (haptics) {
+                  haptics.impact({ style: 'light' }).catch(() => {})
+                }
+              } catch {}
+              computeAndShowMenu()
+              androidSelectionTimeoutRef.current = null
+            }, 260)
           } else if (!isMobile) {
+            // Desktop/Web: hemen göster, haptics varsa çalıştır
+            try {
+              if (haptics) {
+                haptics.impact({ style: 'light' }).catch(() => {})
+              }
+            } catch {}
             computeAndShowMenu()
           }
           
@@ -1731,178 +1855,239 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     manager: 'continuous'
   }
 
-  // iOS için ek text selection handling
+  // iOS için ek text selection handling (polling tabanlı, native menü devre dışıyken daha stabil)
   useEffect(() => {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    
-    if (isIOS && renditionRef.current) {
-      console.log('iOS için global text selection handler ekleniyor')
-      
-      // iOS için basit ve etkili text selection handler
-      const handleIOSSelection = () => {
-        // Eğer bastırma bayrağı aktifse, bu selection event'ini yok say
-        if (suppressNextSelectionRef.current) {
-          console.log('iOS selection event bastırıldı')
-          return
-        }
-        
-        setTimeout(() => {
+    const isIOS =
+      typeof navigator !== 'undefined' &&
+      (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
+    if (!isIOS) return
+
+    console.log('iOS selection polling handler aktif')
+
+    let pollId: number | null = null
+    let touchListenersAttached = false
+
+    const pollSelection = () => {
+      if (suppressNextSelectionRef.current) {
+        return
+      }
+
+      try {
+        let hasAnySelection = false
+
+        const iframes = document.querySelectorAll(
+          '.react-reader-container iframe'
+        )
+        iframes.forEach((iframe: any) => {
           try {
-            // Tüm iframe'leri kontrol et
-            const iframes = document.querySelectorAll('.react-reader-container iframe')
-            iframes.forEach((iframe: any) => {
-              try {
-                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-                if (iframeDoc) {
-                  const selection = iframeDoc.getSelection()
-                  if (selection && selection.toString().trim().length > 0) {
-                    const selectedText = selection.toString().trim()
-                    
-                    // Aynı metin tekrar seçilmişse menüyü açma
-                    if (selectedText === lastSelectedText) {
-                      console.log('iOS: Aynı metin tekrar seçildi, menü açılmıyor')
-                      return
-                    }
-                    
-                    console.log('iOS selection detected:', selectedText)
-                    
-                    // Haptic feedback
-                    if (haptics) {
-                      haptics.impact({ style: 'light' }).catch(() => {})
-                    }
-                    
-                    // CFI range'i oluştur
-                    try {
-                      const range = selection.getRangeAt(0)
-                      let cfiRange = ''
-                      
-                      // Basit CFI range oluştur
-                      if (renditionRef.current && renditionRef.current.location) {
-                        const location = renditionRef.current.location
-                        if (location.start && location.start.cfi) {
-                          cfiRange = location.start.cfi + ':' + range.startOffset + ',' + range.endOffset
-                        } else {
-                          // Alternatif CFI oluştur
-                          cfiRange = 'epubcfi(/6/0):' + range.startOffset + ',' + range.endOffset
-                        }
-                      } else {
-                        // Varsayılan CFI
-                        cfiRange = 'epubcfi(/6/0):' + range.startOffset + ',' + range.endOffset
-                      }
-                      
-                      if (selectedText && selectedText.length > 0) {
-                        console.log('iOS selected text:', selectedText, 'CFI:', cfiRange)
-                        
-                        // Mevcut bölüm bilgisini al
-                        const chapterTitle = currentChapter || ''
-                        
-                        setPendingHighlight({
-                          cfiRange,
-                          selectedText,
-                          chapterTitle
-                        })
-                        
-                        // Son seçilen metni kaydet
-                        setLastSelectedText(selectedText)
-                        
-                        // Context menu için pozisyonu hesapla (iframe ofsetini dikkate al)
-                        const rect = range.getBoundingClientRect()
-                        const iframeRect = (iframe as HTMLIFrameElement).getBoundingClientRect()
-                        const x = iframeRect.left + (rect.left + rect.width / 2)
-                        const y = iframeRect.top + rect.bottom + 10
-                        setContextMenuPosition({ x, y })
-                        setShowContextMenu(true)
-                      }
-                    } catch (error) {
-                      console.error('iOS CFI range oluşturma hatası:', error)
-                      
-                      // Hata durumunda basit highlight oluştur
-                      if (selectedText && selectedText.length > 0) {
-                        console.log('Fallback iOS selection:', selectedText)
-                        
-                        const chapterTitle = currentChapter || ''
-                        
-                        setPendingHighlight({
-                          cfiRange: 'epubcfi(/6/0):0,0',
-                          selectedText,
-                          chapterTitle
-                        })
-                        
-                        // Son seçilen metni kaydet
-                        setLastSelectedText(selectedText)
-                        
-                        // Pozisyonu range üzerinden hesapla
-                        try {
-                          const range = selection.getRangeAt(0)
-                          const rect = range.getBoundingClientRect()
-                          const iframeRect = (iframe as HTMLIFrameElement).getBoundingClientRect()
-                          const x = iframeRect.left + (rect.left + rect.width / 2)
-                          const y = iframeRect.top + rect.bottom + 10
-                          setContextMenuPosition({ x, y })
-                        } catch {}
-                        setShowContextMenu(true)
-                      }
-                    }
+            const iframeDoc =
+              iframe.contentDocument || iframe.contentWindow?.document
+            if (!iframeDoc) return
+
+            const selection = iframeDoc.getSelection()
+            if (!selection) return
+
+            const selectedText = selection.toString().trim()
+            if (!selectedText) return
+
+            hasAnySelection = true
+
+            const now = Date.now()
+
+            // Seçim metni değiştiyse, zaman damgasını güncelle ve bu seçim için menünün
+            // henüz gösterilmediğini işaretle. Ayrıca, varsa mevcut menüyü gizle ki
+            // kullanıcı selector'ı sürüklerken context menü pasif olsun.
+            if (selectedText !== iosLastSelectionTextRef.current) {
+              iosLastSelectionTextRef.current = selectedText
+              iosLastSelectionChangeTimeRef.current = now
+              iosMenuShownForSelectionRef.current = false
+
+              if (showContextMenu) {
+                setShowContextMenu(false)
+              }
+            }
+
+            const isStable =
+              now - iosLastSelectionChangeTimeRef.current > 260
+
+            // Parmağı hâlâ ekrandayken veya seçim stabil değilse ya da
+            // bu seçim için menü zaten gösterildiyse, hiçbir şey yapma
+            if (
+              iosIsTouchSelectingRef.current ||
+              !isStable ||
+              iosMenuShownForSelectionRef.current
+            ) {
+              return
+            }
+
+            console.log('iOS polling selection detected:', selectedText)
+
+            let range: Range
+            try {
+              range = selection.getRangeAt(0)
+            } catch {
+              return
+            }
+
+            // CFI range yaklaşık olarak mevcut konum + offsetler ile oluşturulur
+            let cfiRange = ''
+            const loc = renditionRef.current?.location
+            if (loc?.start?.cfi) {
+              cfiRange = `${loc.start.cfi}:${range.startOffset},${range.endOffset}`
+            } else {
+              cfiRange = `epubcfi(/6/0):${range.startOffset},${range.endOffset}`
+            }
+
+            const chapterTitle = currentChapter || ''
+
+            setPendingHighlight({
+              cfiRange,
+              selectedText,
+              chapterTitle
+            })
+            setLastSelectedText(selectedText)
+
+            // Context menü pozisyonu: seçimin altı + iframe offset'i (alta sığmazsa üstüne)
+            try {
+              const rect = range.getBoundingClientRect()
+              if (rect) {
+                let x = rect.left + rect.width / 2
+                const isMobileView = window.innerWidth < 768
+                const estimatedMenuHeight = isMobileView ? 240 : 264
+                const padding = 10
+
+                // Önce seçimin altına yerleştirmeyi dene
+                let y = rect.bottom + padding
+
+                const iframeRect =
+                  (iframe as HTMLIFrameElement).getBoundingClientRect()
+                let globalY = iframeRect.top + y
+
+                // Eğer ekranın altına taşacaksa, seçimin üstüne yerleştir
+                if (globalY + estimatedMenuHeight > window.innerHeight - 10) {
+                  y = rect.top - estimatedMenuHeight - padding
+                  // Eğer hala üst kenara çok yakınsa, minimum padding bırak
+                  if (iframeRect.top + y < 10) {
+                    y = 10 - iframeRect.top
                   }
                 }
-              } catch (error) {
-                console.log('iOS iframe selection hatası:', error)
+
+                x = iframeRect.left + x
+                y = iframeRect.top + y
+                setContextMenuPosition({ x, y })
+              } else {
+                setContextMenuPosition({
+                  x: window.innerWidth / 2,
+                  y: window.innerHeight / 2
+                })
               }
-            })
-          } catch (error) {
-            console.log('iOS selection handler hatası:', error)
-          }
-        }, 150) // iOS'ta daha uzun bekle
-      }
-      
-      // Event listener'ları ekle
-      document.addEventListener('selectionchange', handleIOSSelection)
-      document.addEventListener('touchend', handleIOSSelection)
-      document.addEventListener('mouseup', handleIOSSelection)
-      
-      // iframe'lerin yüklenmesini bekle ve event listener ekle
-      setTimeout(() => {
-        const iframes = document.querySelectorAll('.react-reader-container iframe')
-        iframes.forEach((iframe: any) => {
-          try {
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-            if (iframeDoc) {
-              // iframe içinde de event listener ekle
-              iframeDoc.addEventListener('selectionchange', handleIOSSelection)
-              iframeDoc.addEventListener('touchend', handleIOSSelection)
-              iframeDoc.addEventListener('mouseup', handleIOSSelection)
-              
-                             console.log('iOS iframe event listener\'lari eklendi')
+            } catch (posErr) {
+              console.log('iOS polling selection pozisyon hatası:', posErr)
+              setContextMenuPosition({
+                x: window.innerWidth / 2,
+                y: window.innerHeight / 2
+              })
             }
-          } catch (error) {
-            console.log('iOS iframe event listener ekleme hatası:', error)
+
+            // Haptic feedback
+            if (haptics) {
+              haptics.impact({ style: 'light' }).catch(() => {})
+            }
+
+            setShowContextMenu(true)
+            iosMenuShownForSelectionRef.current = true
+          } catch (err) {
+            console.log('iOS polling selection genel hatası:', err)
           }
         })
-      }, 2000) // iframe'lerin tam yüklenmesi için daha uzun bekle
-      
-      return () => {
-        document.removeEventListener('selectionchange', handleIOSSelection)
-        document.removeEventListener('touchend', handleIOSSelection)
-        document.removeEventListener('mouseup', handleIOSSelection)
-        
-        // iframe event listener'larını da temizle
-        const iframes = document.querySelectorAll('.react-reader-container iframe')
-        iframes.forEach((iframe: any) => {
-          try {
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-            if (iframeDoc) {
-              iframeDoc.removeEventListener('selectionchange', handleIOSSelection)
-              iframeDoc.removeEventListener('touchend', handleIOSSelection)
-              iframeDoc.removeEventListener('mouseup', handleIOSSelection)
-            }
-          } catch (error) {
-            console.log('iOS iframe event listener temizleme hatası:', error)
-          }
-        })
+
+        // Hiçbir iframe'de seçim kalmadıysa ve context menü açıksa, otomatik kapat
+        if (!hasAnySelection && showContextMenu) {
+          console.log('iOS polling: seçim temizlenmiş, context menü kapatılıyor')
+          setShowContextMenu(false)
+          setPendingHighlight(null)
+        }
+      } catch (err) {
+        console.log('iOS polling selection dış hata:', err)
       }
     }
-  }, [currentChapter, lastSelectedText])
+
+    // Dokunma event'lerini dinleyerek seçim sırasında menünün açılmasını engelle
+    const handleTouchStart = () => {
+      iosIsTouchSelectingRef.current = true
+      // Yeni bir seçim için menüyü tekrar gösterebilmek adına flag'i sıfırla
+      iosMenuShownForSelectionRef.current = false
+    }
+
+    const handleTouchEnd = () => {
+      // Parmağın ekrandan kalktığını işaretle; bir sonraki stabil seçimde menü açılabilir
+      iosIsTouchSelectingRef.current = false
+    }
+
+    const attachTouchListeners = () => {
+      if (touchListenersAttached) return
+      touchListenersAttached = true
+
+      document.addEventListener('touchstart', handleTouchStart, {
+        passive: true
+      })
+      document.addEventListener('touchend', handleTouchEnd, {
+        passive: true
+      })
+
+      const iframes = document.querySelectorAll(
+        '.react-reader-container iframe'
+      )
+      iframes.forEach((iframe: any) => {
+        try {
+          const iframeDoc =
+            iframe.contentDocument || iframe.contentWindow?.document
+          if (iframeDoc) {
+            iframeDoc.addEventListener('touchstart', handleTouchStart, {
+              passive: true
+            })
+            iframeDoc.addEventListener('touchend', handleTouchEnd, {
+              passive: true
+            })
+          }
+        } catch (err) {
+          console.log('iOS iframe touch listener ekleme hatası:', err)
+        }
+      })
+    }
+
+    attachTouchListeners()
+
+    pollId = window.setInterval(pollSelection, 200)
+
+    return () => {
+      if (pollId !== null) {
+        clearInterval(pollId)
+      }
+
+       // Dokunma dinleyicilerini temizle
+      document.removeEventListener('touchstart', handleTouchStart)
+      document.removeEventListener('touchend', handleTouchEnd)
+
+      const iframes = document.querySelectorAll(
+        '.react-reader-container iframe'
+      )
+      iframes.forEach((iframe: any) => {
+        try {
+          const iframeDoc =
+            iframe.contentDocument || iframe.contentWindow?.document
+          if (iframeDoc) {
+            iframeDoc.removeEventListener('touchstart', handleTouchStart)
+            iframeDoc.removeEventListener('touchend', handleTouchEnd)
+          }
+        } catch (err) {
+          console.log('iOS iframe touch listener temizleme hatası:', err)
+        }
+      })
+    }
+  }, [currentChapter, lastSelectedText, showContextMenu])
 
   const isCapacitor = typeof window !== 'undefined' && (window as any).Capacitor
   const isAndroidDevice = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
