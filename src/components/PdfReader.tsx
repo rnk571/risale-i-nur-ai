@@ -213,8 +213,8 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
 
   if (loading) {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ios-safe-area">
-        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ios-nav-safe-area">
+      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
+        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0">
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -253,9 +253,9 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
 
   // Tam ekran modunda üst/bottom bar gizli; çıkmak için bir mini buton ekleyelim (mobilde)
   return (
-    <div className={`h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ios-safe-area ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''}`}>
+    <div className={`h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''}`}>
       {/* Modern Header */}
-      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ios-nav-safe-area ${isFullscreen ? 'hidden' : ''}`}>
+      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ${isFullscreen ? 'hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0 flex-1">

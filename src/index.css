@@ -85,6 +85,15 @@ body {
 }
 
 /* React Reader Styles */
+.reader-viewport {
+  height: 100dvh;
+}
+@supports not (height: 100dvh) {
+  .reader-viewport {
+    height: 100vh;
+  }
+}
+
 .react-reader-container {
   width: 100%;
   position: relative;
@@ -118,16 +127,30 @@ body {
 
 /* Yükseklik ayarlamaları */
 .react-reader-container {
-  height: calc(100vh - 90px) !important;
-  min-height: calc(100vh - 90px) !important;
-  max-height: calc(100vh - 90px) !important;
+  height: calc(100dvh - 90px) !important;
+  min-height: calc(100dvh - 90px) !important;
+  max-height: calc(100dvh - 90px) !important;
+}
+@supports not (height: 100dvh) {
+  .react-reader-container {
+    height: calc(100vh - 90px) !important;
+    min-height: calc(100vh - 90px) !important;
+    max-height: calc(100vh - 90px) !important;
+  }
 }
 
 .react-reader-container.fullscreen {
-  height: 100vh !important;
-  min-height: 100vh !important;
-  max-height: 100vh !important;
-  padding-top: 40px !important; /* Üst kısımda boşluk bırak */
+  height: 100dvh !important;
+  min-height: 100dvh !important;
+  max-height: 100dvh !important;
+  padding-top: 0 !important; /* Fullscreen'de ekstra üst boşluk bırakma */
+}
+@supports not (height: 100dvh) {
+  .react-reader-container.fullscreen {
+    height: 100vh !important;
+    min-height: 100vh !important;
+    max-height: 100vh !important;
+  }
 }
 
 .react-reader-container .ReactReader__Reader {
@@ -155,17 +178,26 @@ body {
 
 /* Mobil için özel yükseklik ayarlamaları */
 @media (max-width: 768px) {
+  /* Mobilde, Reader container'ı parent'ın (flex-1) yüksekliğini tam doldursun.
+     Header ve bottom nav yüksekliğini React tarafındaki layout yönetiyor. */
   .react-reader-container {
-    height: calc(100vh - 140px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    min-height: calc(100vh - 140px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    max-height: calc(100vh - 140px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    max-height: 100% !important;
   }
   
   .react-reader-container.fullscreen {
-    height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    min-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
     padding-top: 40px !important; /* Üst kısımda boşluk bırak */
+  }
+  @supports not (height: 100dvh) {
+    .react-reader-container.fullscreen {
+      height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+      min-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+      max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    }
   }
 }
 
@@ -279,6 +311,30 @@ body {
 
 .dark .react-reader-container button span {
   background-color: rgba(229, 231, 235, 0.8) !important;
+}
+
+/* Tam ekranda ok butonlarını gizle */
+.react-reader-container.fullscreen button[aria-label*="Previous"],
+.react-reader-container.fullscreen button[aria-label*="previous"],
+.react-reader-container.fullscreen button[aria-label*="Önceki"],
+.react-reader-container.fullscreen button[aria-label*="önceki"],
+.react-reader-container.fullscreen button[aria-label*="Next"],
+.react-reader-container.fullscreen button[aria-label*="next"],
+.react-reader-container.fullscreen button[aria-label*="Sonraki"],
+.react-reader-container.fullscreen button[aria-label*="sonraki"],
+.react-reader-container.fullscreen .ReactReader__Arrow,
+.react-reader-container.fullscreen .ReactReader__ArrowLeft,
+.react-reader-container.fullscreen .ReactReader__ArrowRight,
+.react-reader-container.fullscreen button[style*="left: 0"],
+.react-reader-container.fullscreen button[style*="right: 0"],
+.react-reader-container.fullscreen button[style*="position: absolute"][style*="left"],
+.react-reader-container.fullscreen button[style*="position: absolute"][style*="right"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 /* Sayfa değiştirme butonları için saydamlık ayarı */

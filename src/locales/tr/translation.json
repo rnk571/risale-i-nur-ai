@@ -18,6 +18,7 @@
     "retry": "Tekrar Dene",
     "cancel": "İptal",
     "close": "Kapat",
+    "paste": "Yapıştır",
     "public": "Herkese Açık",
     "startReading": "Okumaya Başla"
   },
@@ -92,6 +93,12 @@
     "search": "Ara",
     "speak": "Seslendir",
     "speechLanguage": "Seslendirme Dili",
+    "searchInHeadings": "Başlıklarda ara",
+    "searchInBook": "Tüm kitapta ara",
+    "searchPlaceholder": "Aranacak kelime veya ifade...",
+    "searching": "Aranıyor...",
+    "searchMinChars": "Metin aramasında en az 2 karakter yazın",
+    "searchNoResults": "Herhangi bir sonuç bulunamadı",
     "toastTitles": {
       "success": "Başarılı",
       "error": "Hata",
@@ -106,11 +113,15 @@
       "highlightDeleteError": "Vurgulama silinirken hata oluştu!",
       "copySuccess": "Metin kopyalandı!",
       "copyError": "Kopyalama başarısız!",
+      "copySystem": "Bu cihazda metni kopyalamak için sistem menüsünü kullanın (metni seçip 'Kopyala'ya dokunun).",
       "searchOpened": "Arama açıldı!",
       "navigatingTo": "\"{{quote}}\" konumuna gidiliyor...",
       "ttsNotAvailable": "Seslendirme desteği bulunamadı",
       "ttsStarted": "Seslendirme başladı",
-      "ttsStartError": "Seslendirme başlatılamadı"
+      "ttsStartError": "Seslendirme başlatılamadı",
+      "searchNoResults": "Arama sonucu bulunamadı",
+      "searchError": "Arama yapılırken bir hata oluştu",
+      "searchTooShort": "Arama için en az 2 karakter yazın"
     }
   },
   "highlight": "Vurgula",

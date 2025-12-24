@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react'
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ReactReader } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info } from 'lucide-react'
+import { ReactReader, ReactReaderStyle } from 'react-reader'
+import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info, Search, Clipboard } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType, addHighlight, getHighlights, updateHighlight, deleteHighlight, type Highlight } from '../lib/progressService'
 import { BookmarkNoteModal } from './BookmarkNoteModal'
 import { HighlightModal } from './HighlightModal'
@@ -18,9 +18,18 @@ interface EpubReaderProps {
   toggleDarkMode?: () => void
 }
 
-// iOS için haptic feedback
+interface TextSearchResult {
+  id: string
+  chapterTitle: string
+  snippet: string
+  cfi?: string
+  href?: string
+}
+
+// iOS için haptic feedback, TTS ve Clipboard
 let haptics: any = null
 let tts: any = null
+let nativeClipboard: any = null
 if (typeof window !== 'undefined' && (window as any).Capacitor) {
   import('@capacitor/haptics').then(({ Haptics }) => {
     haptics = Haptics
@@ -32,6 +41,11 @@ if (typeof window !== 'undefined' && (window as any).Capacitor) {
   }).catch(() => {
     console.log('TextToSpeech plugin yüklenemedi')
   })
+  try {
+    nativeClipboard = (window as any).Capacitor?.Plugins?.Clipboard || null
+  } catch {
+    nativeClipboard = null
+  }
 }
 
 export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode }) => {
@@ -65,6 +79,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const [toastEnter, setToastEnter] = useState(false)
   const [ttsLanguage, setTtsLanguage] = useState<string>('tr-TR')
   
+  // Search states
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchScope, setSearchScope] = useState<'toc' | 'text'>('toc')
+  const [textSearchResults, setTextSearchResults] = useState<TextSearchResult[]>([])
+  const [isSearchingText, setIsSearchingText] = useState(false)
+  
   // Context menu states
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 })
@@ -78,15 +99,147 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const iosLastSelectionTextRef = useRef<string>('')
   const iosLastSelectionChangeTimeRef = useRef<number>(0)
   const iosMenuShownForSelectionRef = useRef<boolean>(false)
+  const lastLocationRef = useRef<string | number>(0)
   const tocRef = useRef<any>(null)
+  const bottomNavRef = useRef<HTMLDivElement | null>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const isFullscreenRef = useRef<boolean>(false)
+  const contentDocsRef = useRef<Set<Document>>(new Set())
+  const searchHighlightCfiRef = useRef<string | null>(null)
   
+  useEffect(() => {
+    isFullscreenRef.current = isFullscreen
+  }, [isFullscreen])
+
+  // ReactReader default olarak reader alanını soldan/sağdan 50px daraltıyor.
+  // Fullscreen'de gerçek "tam ekran" hissi için bu inset'leri küçültüyoruz.
+  const fullscreenReaderStyles = useMemo(() => {
+    if (!isFullscreen) return undefined
+    return {
+      ...ReactReaderStyle,
+      titleArea: {
+        ...ReactReaderStyle.titleArea,
+        display: 'none'
+      },
+      reader: {
+        ...ReactReaderStyle.reader,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0
+      },
+      swipeWrapper: {
+        ...ReactReaderStyle.swipeWrapper,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0
+      },
+      // Tam ekranda ok butonlarını gizle
+      arrow: {
+        ...ReactReaderStyle.arrow,
+        display: 'none'
+      }
+    }
+  }, [isFullscreen])
+
+  const ensureReaderLayoutOverrides = useCallback((doc: Document) => {
+    const head = doc.head || doc.querySelector('head')
+    if (!head) return
+    const STYLE_ID = 'reader-layout-overrides'
+    if (!doc.getElementById(STYLE_ID)) {
+      const style = doc.createElement('style')
+      style.id = STYLE_ID
+      style.textContent = `
+        :root {
+          --reader-pad-x: 20px;
+          --reader-pad-y: 20px;
+        }
+        html, body {
+          margin: 0 !important;
+          max-width: none !important;
+        }
+        body {
+          padding: var(--reader-pad-y) var(--reader-pad-x) !important;
+          box-sizing: border-box !important;
+        }
+        /* Bazı EPUB'lar wrapper'lara margin/max-width koyuyor */
+        body * {
+          max-width: none !important;
+        }
+      `
+      head.appendChild(style)
+    }
+
+    const padX = isFullscreenRef.current ? 6 : 20
+    const padY = isFullscreenRef.current ? 10 : 20
+    doc.documentElement.style.setProperty('--reader-pad-x', `${padX}px`)
+    doc.documentElement.style.setProperty('--reader-pad-y', `${padY}px`)
+  }, [])
+
+  // Hedef: içerik scroll olmasın; sayfalar "paginated" olarak ileri/geri gitsin.
+  const applyReaderInsets = useCallback(() => {
+    // Önce epubjs'in bildiği içerikleri güncelle (en stabil yol)
+    contentDocsRef.current.forEach((doc) => {
+      try {
+        ensureReaderLayoutOverrides(doc)
+        doc.documentElement.style.overflow = 'hidden'
+        doc.body.style.overflow = 'hidden'
+      } catch {}
+    })
+
+    // Fallback: iframe üzerinden yakalamaya çalış (bazı durumlarda getContents boş olabiliyor)
+    const iframes = document.querySelectorAll<HTMLIFrameElement>('.react-reader-container iframe')
+    iframes.forEach((iframe) => {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
+        if (!iframeDoc?.body) return
+        contentDocsRef.current.add(iframeDoc)
+        ensureReaderLayoutOverrides(iframeDoc)
+        iframeDoc.documentElement.style.overflow = 'hidden'
+        iframeDoc.body.style.overflow = 'hidden'
+      } catch (error) {
+        console.log('reader inset uygulama hatası:', error)
+      }
+    })
+  }, [ensureReaderLayoutOverrides])
+
   // Sayfa bilgileri için yeni state'ler
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [currentChapter, setCurrentChapter] = useState('')
-  const [, setToc] = useState<any[]>([])
+  const [toc, setToc] = useState<any[]>([])
   const [lastSelectedText, setLastSelectedText] = useState<string>('')
+
+  const flatToc = useMemo(() => {
+    const result: any[] = []
+
+    const walk = (items: any[], parentLabel?: string) => {
+      if (!items) return
+      items.forEach((item) => {
+        const label = (item.label || '').toString()
+        const fullLabel = parentLabel ? `${parentLabel} › ${label}` : label
+        result.push({
+          ...item,
+          fullLabel
+        })
+        if (item.subitems && item.subitems.length > 0) {
+          walk(item.subitems, fullLabel)
+        }
+      })
+    }
+
+    walk(toc || [])
+    return result
+  }, [toc])
+
+  const filteredToc = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return flatToc
+    return flatToc.filter((item) =>
+      (item.fullLabel || '').toLowerCase().includes(q)
+    )
+  }, [flatToc, searchQuery])
 
   // Component mount olduğunda debug bilgisi
   useEffect(() => {
@@ -134,6 +287,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       if (showSettings && !target.closest('.settings-panel')) {
         setShowSettings(false)
       }
+
+      // Arama paneli için
+      if (showSearch && !target.closest('.search-panel')) {
+        setShowSearch(false)
+      }
     }
 
     document.addEventListener('mousedown', handlePointerOutside)
@@ -142,7 +300,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       document.removeEventListener('mousedown', handlePointerOutside)
       document.removeEventListener('touchstart', handlePointerOutside)
     }
-  }, [showMenu, showBookmarks, showSettings, showHighlights, showContextMenu])
+  }, [showMenu, showBookmarks, showSettings, showHighlights, showContextMenu, showSearch])
 
   // ESC tuşu ile panelleri kapatma
   useEffect(() => {
@@ -159,6 +317,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           setShowContextMenu(false)
           setPendingHighlight(null)
           clearSelectionsAndSuppress(500)
+        } else if (showSearch) {
+          setShowSearch(false)
         } else if (showMenu) {
           setShowMenu(false)
         }
@@ -167,7 +327,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [showSettings, showBookmarks, showMenu, showHighlights, showContextMenu])
+  }, [showSettings, showBookmarks, showMenu, showHighlights, showContextMenu, showSearch])
 
   // Timeout için yükleme kontrolü
   useEffect(() => {
@@ -237,6 +397,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
   const locationChanged = useCallback((epubcifi: string) => {
     setLocation(epubcifi)
+    lastLocationRef.current = epubcifi
     
     // İlerleme yüzdesini ve sayfa bilgilerini hesapla
     if (renditionRef.current) {
@@ -412,15 +573,21 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           try {
             const doc = contents.document as Document | undefined
             if (!doc) return
+            contentDocsRef.current.add(doc)
+            // İçerik her yüklendiğinde layout override'larını enjekte et
+            ensureReaderLayoutOverrides(doc)
 
             const head = doc.querySelector('head')
             if (head) {
               const style = doc.createElement('style')
+
+              // Eğer iOS + Capacitor ortamındaysak ve native Clipboard eklentisi yoksa,
+              // sistemin kendi "Kopyala" menüsünü engelleme (kullanıcı sistem menüsünü kullanabilsin).
+              const disableNativeCallout = !(isIOS && (window as any).Capacitor && !nativeClipboard)
+
               style.innerHTML = `
                 * {
-                  /* iOS'ta uzun basınca çıkan native menüyü engelle */
-                  -webkit-touch-callout: none !important;
-                  /* Metin seçimine izin ver */
+                  ${disableNativeCallout ? '-webkit-touch-callout: none !important;' : ''}
                   -webkit-user-select: text;
                   user-select: text;
                 }
@@ -428,10 +595,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
               head.appendChild(style)
             }
 
-            // Native context menu'yü kapat (özellikle iOS için)
-            doc.addEventListener('contextmenu', (e) => {
-              e.preventDefault()
-            })
+            // Native context menu'yü sadece iOS + Capacitor + nativeClipboard varken kapat
+            // (yani sistem menüsüne ihtiyaç duymadığımız durumda)
+            if (!(isIOS && (window as any).Capacitor && !nativeClipboard)) {
+              doc.addEventListener('contextmenu', (e) => {
+                e.preventDefault()
+              })
+            }
 
             // EPUB içeriğinde herhangi bir dokunuşta açık context menüyü kapat
             // (özellikle mobilde text selection handle'larına dokunulduğunda)
@@ -446,6 +616,78 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 setShowContextMenu(false)
                 setPendingHighlight(null)
               })
+
+              // Android'de: tam ekranda içerik üzerinde yatay swipe ile sayfa değiştir
+              let touchStartX: number | null = null
+              let touchStartY: number | null = null
+              let touchStartTime: number | null = null
+
+              const handleSwipeStart = (e: TouchEvent) => {
+                if (!isFullscreenRef.current) return
+                try {
+                  const touch = e.touches[0]
+                  if (!touch) return
+                  touchStartX = touch.clientX
+                  touchStartY = touch.clientY
+                  touchStartTime = Date.now()
+                } catch {}
+              }
+
+              const handleSwipeEnd = (e: TouchEvent) => {
+                if (!isFullscreenRef.current) return
+
+                const startX = touchStartX
+                const startY = touchStartY
+                const startTime = touchStartTime
+
+                touchStartX = null
+                touchStartY = null
+                touchStartTime = null
+
+                if (startX == null || startY == null || startTime == null) return
+
+                try {
+                  const touch = e.changedTouches[0]
+                  if (!touch) return
+
+                  const dx = touch.clientX - startX
+                  const dy = touch.clientY - startY
+                  const dt = Date.now() - startTime
+
+                  const HORIZONTAL_THRESHOLD = 40  // piksel
+                  const VERTICAL_THRESHOLD = 120   // dikey sapma limiti
+                  const MAX_DURATION = 800         // ms
+
+                  // Çok uzun basılı tutma veya fazla dikey hareket: swipe sayma
+                  if (dt > MAX_DURATION) return
+                  if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return
+                  if (Math.abs(dy) > VERTICAL_THRESHOLD) return
+
+                  // Bu dokunma metin seçimi ile sonuçlandıysa sayfa değiştirme (seçimi bozmayalım)
+                  try {
+                    const sel = doc.getSelection?.()
+                    if (sel && sel.toString().trim()) {
+                      return
+                    }
+                  } catch {}
+
+                  const target = e.target as HTMLElement | null
+                  if (target && target.closest('a, button, input, textarea, select, label')) {
+                    return
+                  }
+
+                  // dx < 0: sola doğru swipe (sonraki sayfa)
+                  if (dx < 0) {
+                    renditionRef.current?.next?.()
+                  } else {
+                    // dx > 0: sağa doğru swipe (önceki sayfa)
+                    renditionRef.current?.prev?.()
+                  }
+                } catch {}
+              }
+
+              doc.addEventListener('touchstart', handleSwipeStart, { passive: true })
+              doc.addEventListener('touchend', handleSwipeEnd, { passive: true })
             }
           } catch (err) {
             console.log('EPUB content hook hatası:', err)
@@ -602,7 +844,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         'line-height': '1.6',
         'padding': '20px',
         'margin': '0',
-        'min-height': '100vh'
       },
       'p, div, span, section, article': {
         color: '#1f2937',
@@ -626,7 +867,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         'line-height': '1.6',
         'padding': '20px',
         'margin': '0',
-        'min-height': '100vh'
       },
       'p, div, span, section, article': {
         color: '#e5e7eb',
@@ -642,6 +882,51 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       }
     })
 
+    // Tam ekranda ekranın sağına/soluna tıklayarak sayfa değiştirme
+    try {
+      rendition.on('click', (event: any) => {
+        try {
+          // Sadece tam ekran modunda çalışsın
+          if (!isFullscreenRef.current) return
+
+          const target = event?.target as HTMLElement | null
+
+          // Metin seçimi varken sayfa değiştirme (örneğin selection'ı düzeltmek isterken) tetiklenmesin
+          if (hasActiveTextSelection()) return
+
+          // Link, buton vb. etkileşimli elementlere tıklamayı bozma
+          if (target) {
+            if (target.closest('a, button, input, textarea, select, label')) {
+              return
+            }
+          }
+
+          // Tıklamanın konumuna göre yön belirle
+          const view = (event?.view as Window | undefined) || target?.ownerDocument?.defaultView || window
+          const localWindow = view || window
+          const width = localWindow.innerWidth || window.innerWidth
+          const clientX: number | undefined =
+            (event && typeof event.clientX === 'number' && event.clientX) ||
+            (event && typeof event.screenX === 'number' && event.screenX)
+
+          if (!width || clientX == null) return
+
+          const ratio = clientX / width
+
+          // Sol 1/3: önceki sayfa, sağ 1/3: sonraki sayfa
+          if (ratio < 0.33) {
+            goToPrevious()
+          } else if (ratio > 0.66) {
+            goToNext()
+          }
+        } catch (clickErr) {
+          console.log('Fullscreen click navigation error:', clickErr)
+        }
+      })
+    } catch (err) {
+      console.log('Rendition click handler eklenemedi:', err)
+    }
+
     // Mevcut dark mode durumuna göre tema uygula
     const currentTheme = isDarkMode ? 'dark' : 'light'
     console.log('Uygulanacak tema:', currentTheme)
@@ -651,27 +936,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     // Font boyutunu uygula
     rendition.themes.fontSize(`${fontSize}%`)
     
-    // Yükseklik ayarlaması
-    setTimeout(() => {
-      const iframes = document.querySelectorAll('.react-reader-container iframe')
-      iframes.forEach((iframe: any) => {
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-          if (iframeDoc && iframeDoc.body) {
-            if (isFullscreen) {
-              iframeDoc.body.style.height = '100vh'
-              iframeDoc.body.style.maxHeight = '100vh'
-            } else {
-              iframeDoc.body.style.height = 'calc(100vh - 140px)'
-              iframeDoc.body.style.maxHeight = 'calc(100vh - 140px)'
-            }
-            iframeDoc.body.style.overflow = 'auto'
-          }
-        } catch (error) {
-          console.log('iframe yükseklik ayarlama hatası:', error)
-        }
-      })
-    }, 100)
+    // İlk render sonrası inset/padding uygula
+    setTimeout(() => applyReaderInsets(), 80)
     
     // Kitap bilgilerini ve TOC'u al
     if (rendition.book) {
@@ -698,7 +964,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
     
     console.log('=== READER READY TAMAMLANDI ===')
-  }, [readerTheme, fontSize, currentChapter])
+  }, [readerTheme, fontSize, currentChapter, applyReaderInsets])
 
   // Highlight'ları render et
   const renderHighlights = useCallback(() => {
@@ -1170,15 +1436,78 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   }
 
   const handleCopyFromContext = async () => {
-    if (pendingHighlight?.selectedText) {
+    const text = pendingHighlight?.selectedText
+    if (!text || !text.trim()) {
+      setShowContextMenu(false)
+      setPendingHighlight(null)
+      return
+    }
+
+    // iOS + Capacitor ortamında ve native Clipboard eklentisi yoksa,
+    // programatik kopyalama genellikle başarısız oluyor. Bu durumda
+    // kullanıcıya sistemin kendi "Kopyala" menüsünü kullanmasını söyle.
+    const isIOS =
+      typeof navigator !== 'undefined' &&
+      (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+    const isCapacitorEnv = typeof window !== 'undefined' && (window as any).Capacitor
+
+    if (isIOS && isCapacitorEnv && !nativeClipboard) {
+      showToastMessage(t('reader.toasts.copySystem'), 'info')
+      setShowContextMenu(false)
+      setPendingHighlight(null)
+      return
+    }
+
+    let copied = false
+
+    // 1) Capacitor Clipboard (native) – özellikle iOS için
+    if (!copied && nativeClipboard) {
       try {
-        await navigator.clipboard.writeText(pendingHighlight.selectedText)
-        showToastMessage(t('reader.toasts.copySuccess'), 'success')
-      } catch (error) {
-        console.error('Copy error:', error)
-        showToastMessage(t('reader.toasts.copyError'), 'error')
+        await nativeClipboard.write({ string: text })
+        copied = true
+      } catch (err) {
+        console.log('Native clipboard yazma hatası:', err)
       }
     }
+
+    // 2) Modern Web API
+    if (!copied && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text)
+        copied = true
+      } catch (err) {
+        console.log('navigator.clipboard hata:', err)
+      }
+    }
+
+    // 3) Eski execCommand fallback (WebView / eski browser)
+    if (!copied && typeof document !== 'undefined') {
+      try {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.style.position = 'fixed'
+        textarea.style.top = '-1000px'
+        textarea.style.left = '-1000px'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        const ok = document.execCommand('copy')
+        document.body.removeChild(textarea)
+        if (ok) {
+          copied = true
+        }
+      } catch (err) {
+        console.log('execCommand copy hata:', err)
+      }
+    }
+
+    if (copied) {
+      showToastMessage(t('reader.toasts.copySuccess'), 'success')
+    } else {
+      showToastMessage(t('reader.toasts.copyError'), 'error')
+    }
+
     setShowContextMenu(false)
     setPendingHighlight(null)
   }
@@ -1496,6 +1825,67 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
   }
 
+  // Ortak yardımcı: herhangi bir yerde (iframe'ler + pencere) aktif metin seçimi var mı?
+  const hasActiveTextSelection = useCallback((): boolean => {
+    try {
+      const iframes = document.querySelectorAll<HTMLIFrameElement>('.react-reader-container iframe')
+      for (const iframe of Array.from(iframes)) {
+        try {
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
+          const sel = iframeDoc?.getSelection?.()
+          if (sel && sel.toString().trim()) {
+            return true
+          }
+        } catch {}
+      }
+
+      const winSel = window.getSelection?.()
+      if (winSel && winSel.toString().trim()) {
+        return true
+      }
+    } catch {}
+    return false
+  }, [])
+
+  // Native (iOS) gesture köprüsü: nativeReaderTap / nativeReaderSwipe
+  useEffect(() => {
+    const handleNativeTap = (event: any) => {
+      if (!isFullscreenRef.current) return
+      // Metin seçimi varken native tap ile sayfa değiştirme
+      if (hasActiveTextSelection()) return
+
+      const x = event?.detail?.x
+      if (typeof x !== 'number') return
+
+      if (x < 0.33) {
+        goToPrevious()
+      } else if (x > 0.66) {
+        goToNext()
+      }
+    }
+
+    const handleNativeSwipe = (event: any) => {
+      if (!isFullscreenRef.current) return
+      // Metin seçimi varken native swipe ile sayfa değiştirme
+      if (hasActiveTextSelection()) return
+
+      const direction = event?.detail
+      if (direction === 'next') {
+        goToNext()
+      } else if (direction === 'prev') {
+        goToPrevious()
+      }
+    }
+
+    window.addEventListener('nativeReaderTap', handleNativeTap as any)
+    window.addEventListener('nativeReaderSwipe', handleNativeSwipe as any)
+
+    return () => {
+      window.removeEventListener('nativeReaderTap', handleNativeTap as any)
+      window.removeEventListener('nativeReaderSwipe', handleNativeSwipe as any)
+    }
+  }, [goToNext, goToPrevious, hasActiveTextSelection])
+
   const changeTheme = (theme: string) => {
     console.log('=== CHANGE THEME ===')
     console.log('Current theme:', readerTheme)
@@ -1789,70 +2179,369 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
   }
 
+  const handleTocItemClick = (item: any) => {
+    if (!renditionRef.current) return
+
+    try {
+      const target = item.href || item.cfi || (item.hrefs && item.hrefs[0])
+      if (target) {
+        renditionRef.current.display(target)
+        setShowSearch(false)
+        const label = (item.fullLabel || item.label || '').toString()
+        if (label) {
+          showToastMessage(
+            t('reader.toasts.navigatingTo', {
+              quote: `${label.substring(0, 50)}${label.length > 50 ? '...' : ''}`
+            }),
+            'info'
+          )
+        }
+      }
+    } catch (error) {
+      console.error('TOC navigation error:', error)
+    }
+  }
+
+  const handleTextSearchResultClick = async (result: TextSearchResult) => {
+    if (!renditionRef.current) return
+
+    try {
+      const target = result.cfi || result.href
+      if (!target) return
+
+      // Önce ilgili konuma git
+      try {
+        const displayResult = renditionRef.current.display(target)
+        if (displayResult && typeof displayResult.then === 'function') {
+          await displayResult
+        }
+      } catch (displayErr) {
+        console.log('Search result display hatası:', displayErr)
+      }
+
+      setShowSearch(false)
+
+      const snippet = result.snippet || ''
+      showToastMessage(
+        t('reader.toasts.navigatingTo', {
+          quote: `${snippet.substring(0, 50)}${snippet.length > 50 ? '...' : ''}`
+        }),
+        'info'
+      )
+
+      // Kısa süreli arama highlight'ı
+      if (result.cfi && renditionRef.current.annotations) {
+        const cfi = result.cfi
+
+        // Eski arama highlight'ını (varsa) kaldır
+        try {
+          if (searchHighlightCfiRef.current) {
+            renditionRef.current.annotations.remove(
+              searchHighlightCfiRef.current,
+              'highlight'
+            )
+          }
+        } catch (removeErr) {
+          console.log('Önceki search highlight kaldırma hatası:', removeErr)
+        }
+
+        // Yeni search highlight CFI'sini kaydet
+        searchHighlightCfiRef.current = cfi
+
+        // Sayfa tamamen yüklensin, sonra highlight ekle
+        window.setTimeout(() => {
+          try {
+            renditionRef.current.annotations.add(
+              'highlight',
+              cfi,
+              {},
+              null,
+              'search-temp-highlight',
+              {
+                fill: '#fde68a', // amber-200
+                'fill-opacity': '0.65',
+                'mix-blend-mode': 'multiply'
+              }
+            )
+
+            // 2.5 saniye sonra arama highlight'ını kaldır (yalnızca hâlâ aynı CFI ise)
+            window.setTimeout(() => {
+              try {
+                if (searchHighlightCfiRef.current === cfi) {
+                  renditionRef.current.annotations.remove(cfi, 'highlight')
+                  searchHighlightCfiRef.current = null
+                }
+              } catch (removeLaterErr) {
+                console.log('Search highlight otomatik kaldırma hatası:', removeLaterErr)
+              }
+            }, 2500)
+          } catch (annErr) {
+            console.log('Search highlight ekleme hatası:', annErr)
+          }
+        }, 400)
+      }
+    } catch (error) {
+      console.error('Search result navigation error:', error)
+      showToastMessage(t('reader.toasts.searchError'), 'error')
+    }
+  }
+
+  const handlePasteIntoSearch = async () => {
+    try {
+      let text = ''
+
+      // 1) Native Clipboard (Capacitor)
+      if (nativeClipboard && typeof nativeClipboard.read === 'function') {
+        try {
+          const result = await nativeClipboard.read()
+          // Farklı Clipboard implementasyonları için esnek okuma
+          text =
+            (result && (result.string || result.text || result.value)) ||
+            ''
+        } catch (err) {
+          console.log('Native clipboard read hatası:', err)
+        }
+      }
+
+      // 2) Web Clipboard API
+      if (!text && typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+        try {
+          text = await navigator.clipboard.readText()
+        } catch (err) {
+          console.log('navigator.clipboard.readText hatası:', err)
+        }
+      }
+
+      text = text.trim()
+      if (!text) {
+        showToastMessage(t('reader.toasts.copyError'), 'error')
+        return
+      }
+
+      setSearchQuery((prev) => {
+        if (!prev) return text
+        // Sonuna ekleyelim, araya boşluk koyarak
+        return `${prev.trim()} ${text}`
+      })
+    } catch (err) {
+      console.log('handlePasteIntoSearch hatası:', err)
+      showToastMessage(t('reader.toasts.copyError'), 'error')
+    }
+  }
+
+  const handleSearchSubmit = async () => {
+    const query = searchQuery.trim()
+    if (!query) {
+      setTextSearchResults([])
+      return
+    }
+
+    if (searchScope === 'text' && query.length < 2) {
+      showToastMessage(t('reader.toasts.searchTooShort'), 'info')
+      return
+    }
+
+    if (searchScope === 'toc') {
+      // TOC araması filtrelenmiş listeden otomatik yapılır, ekstra işlem gerekmez
+      if (filteredToc.length === 0) {
+        showToastMessage(t('reader.toasts.searchNoResults'), 'info')
+      }
+      return
+    }
+
+    if (!renditionRef.current?.book) {
+      showToastMessage(t('reader.toasts.searchError'), 'error')
+      return
+    }
+
+    setIsSearchingText(true)
+    setTextSearchResults([])
+
+    try {
+      const book = renditionRef.current.book
+
+      // Kitap tam olarak yüklensin
+      try {
+        if (book.ready && typeof book.ready.then === 'function') {
+          await book.ready
+        }
+      } catch (readyErr) {
+        console.log('Metin arama book.ready hatası:', readyErr)
+      }
+
+      const spineSections = (book.spine && (book.spine.spineItems || [])) || []
+      const normalizedQuery = query.toLowerCase().replace(/\s+/g, ' ').trim()
+      const newResults: TextSearchResult[] = []
+      const MAX_RESULTS = 50
+      const MAX_PER_SECTION = 5
+
+      for (const section of spineSections as any[]) {
+        if (!section || newResults.length >= MAX_RESULTS) continue
+
+        try {
+          // Bölüm belgesi yüklü değilse yükle
+          if (!section.document && typeof section.load === 'function') {
+            await section.load(book.load?.bind(book))
+          }
+
+          if (!section.document) continue
+
+          let matches: any[] = []
+          try {
+            if (typeof section.search === 'function') {
+              matches = section.search(query)
+            } else if (typeof section.find === 'function') {
+              matches = section.find(query)
+            }
+          } catch (searchErr) {
+            console.log('Metin arama section.search hatası:', searchErr)
+          }
+
+          // Eğer epub.js search/find sonuç vermediyse, daha toleranslı bir fallback dene
+          if ((!matches || matches.length === 0) && section.document?.body) {
+            try {
+              const rawBody = section.document.body.textContent || ''
+              const normalizedBody = rawBody.toLowerCase().replace(/\s+/g, ' ').trim()
+
+              const pos = normalizedBody.indexOf(normalizedQuery)
+              if (pos !== -1) {
+                const SNIPPET_CHARS = 80
+                const snippetStart = Math.max(0, pos - SNIPPET_CHARS)
+                const snippetEnd = Math.min(
+                  normalizedBody.length,
+                  pos + normalizedQuery.length + SNIPPET_CHARS
+                )
+                const snippet = normalizedBody.slice(snippetStart, snippetEnd).trim()
+
+                matches = [
+                  {
+                    cfi: undefined,
+                    excerpt: snippet
+                  }
+                ]
+              }
+            } catch (fallbackErr) {
+              console.log('Metin arama fallback hatası:', fallbackErr)
+            }
+          }
+
+          if (!matches || matches.length === 0) continue
+
+          // Bölüm başlığını TOC üzerinden bulmaya çalış
+          let chapterTitle = currentChapter || t('reader.unknownChapter')
+          try {
+            const sectionHref = section.href as string | undefined
+            if (sectionHref && flatToc && flatToc.length > 0) {
+              const tocItem = flatToc.find((item: any) => {
+                if (!item.href) return false
+                const baseHref = (item.href as string).split('#')[0]
+                return baseHref === sectionHref
+              })
+              if (tocItem) {
+                const label = (tocItem.label || tocItem.fullLabel || '').toString()
+                if (label) {
+                  chapterTitle = label
+                }
+              }
+            }
+          } catch {}
+
+          let matchesInSection = 0
+          for (const match of matches) {
+            if (newResults.length >= MAX_RESULTS || matchesInSection >= MAX_PER_SECTION) {
+              break
+            }
+
+            const rawSnippet = (match.excerpt || '').toString()
+            const snippet = rawSnippet.replace(/\s+/g, ' ').trim()
+            if (!snippet) continue
+
+            newResults.push({
+              id: `${section.href || section.idref || ''}-${newResults.length}`,
+              chapterTitle,
+              snippet,
+              cfi: match.cfi,
+              href: section.href
+            })
+
+            matchesInSection += 1
+          }
+        } catch (sectionError) {
+          console.log('Metin arama bölüm hatası:', sectionError)
+        } finally {
+          try {
+            if (section && typeof section.unload === 'function') {
+              section.unload()
+            }
+          } catch {}
+        }
+
+        if (newResults.length >= MAX_RESULTS) {
+          break
+        }
+      }
+
+      setTextSearchResults(newResults)
+
+      if (newResults.length === 0) {
+        showToastMessage(t('reader.toasts.searchNoResults'), 'info')
+      }
+    } catch (error) {
+      console.error('Metin arama hatası:', error)
+      showToastMessage(t('reader.toasts.searchError'), 'error')
+    } finally {
+      setIsSearchingText(false)
+    }
+  }
+
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen)
   }
 
-  // Tam ekran değişikliklerini dinle ve yüksekliği güncelle
+  // Tam ekran değişikliklerini dinle ve inset/padding'i güncelle
   useEffect(() => {
-    const updateHeight = () => {
-      const iframes = document.querySelectorAll('.react-reader-container iframe')
-      iframes.forEach((iframe: any) => {
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-          if (iframeDoc && iframeDoc.body) {
-            if (isFullscreen) {
-              iframeDoc.body.style.height = '100vh'
-              iframeDoc.body.style.maxHeight = '100vh'
-            } else {
-              iframeDoc.body.style.height = 'calc(100vh - 140px)'
-              iframeDoc.body.style.maxHeight = 'calc(100vh - 140px)'
-            }
-            iframeDoc.body.style.overflow = 'auto'
-          }
-        } catch (error) {
-          console.log('iframe yükseklik ayarlama hatası:', error)
+    const id = window.setTimeout(() => {
+      applyReaderInsets()
+      // Paginated layout'ta padding/viewport değişince yeniden ölçmek gerekebiliyor
+      try {
+        const rendition = renditionRef.current
+        if (rendition?.resize) {
+          rendition.resize()
         }
-      })
-    }
 
-    // Kısa bir gecikme ile yüksekliği güncelle
-    setTimeout(updateHeight, 100)
-  }, [isFullscreen])
+        // Özellikle iOS'ta fullscreen'den çıkarken bazen sayfa boş görünebiliyor.
+        // Mevcut konumu yeniden display ederek sayfayı zorla yeniden çiziyoruz.
+        if (!isFullscreen && rendition) {
+          const currentLoc =
+            (rendition.location &&
+              (rendition.location.start?.cfi || (rendition.location as any).cfi)) ||
+            lastLocationRef.current
 
-  // Window resize olayını dinle ve yüksekliği güncelle
+          if (currentLoc) {
+            rendition.display(currentLoc)
+          }
+        }
+      } catch {}
+    }, 120)
+    return () => window.clearTimeout(id)
+  }, [isFullscreen, applyReaderInsets])
+
+  // Window resize olayını dinle ve inset/padding'i güncelle
   useEffect(() => {
     const handleResize = () => {
-      setTimeout(() => {
-        const iframes = document.querySelectorAll('.react-reader-container iframe')
-        iframes.forEach((iframe: any) => {
-          try {
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-            if (iframeDoc && iframeDoc.body) {
-              if (isFullscreen) {
-                iframeDoc.body.style.height = '100vh'
-                iframeDoc.body.style.maxHeight = '100vh'
-              } else {
-                iframeDoc.body.style.height = 'calc(100vh - 140px)'
-                iframeDoc.body.style.maxHeight = 'calc(100vh - 140px)'
-              }
-              iframeDoc.body.style.overflow = 'auto'
-            }
-          } catch (error) {
-            console.log('resize iframe yükseklik ayarlama hatası:', error)
-          }
-        })
-      }, 100)
+      window.setTimeout(applyReaderInsets, 100)
     }
 
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [isFullscreen])
+  }, [applyReaderInsets])
 
   const epubInitOptions = {
     openAs: 'epub',
     flow: 'paginated',
-    manager: 'continuous'
+    // 'continuous' küçük ekranlarda dikey scroll'a yol açabiliyor
+    manager: 'default',
+    spread: 'none'
   }
 
   // iOS için ek text selection handling (polling tabanlı, native menü devre dışıyken daha stabil)
@@ -2093,6 +2782,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const isAndroidDevice = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
   const isIOSDeviceMenu = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
   const isMobileCap = isCapacitor && (isAndroidDevice || isIOSDeviceMenu)
+  const iosSafeAreaClass = isIOSDeviceMenu ? 'ios-safe-area' : ''
+  const iosNavSafeAreaClass = isIOSDeviceMenu ? 'ios-nav-safe-area' : ''
+  const iosBottomSafeAreaClass = isIOSDeviceMenu ? 'ios-bottom-safe-area' : ''
 
   const handleSpeakFromContext = async () => {
     try {
@@ -2151,8 +2843,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
   if (isLoading) {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ios-safe-area">
-        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ios-nav-safe-area">
+      <div className={`reader-viewport overflow-hidden flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ${iosSafeAreaClass}`}>
+        <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ${iosNavSafeAreaClass}`}>
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -2189,8 +2881,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 
   if (error) {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ios-safe-area">
-        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ios-nav-safe-area">
+      <div className={`reader-viewport overflow-hidden flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ${iosSafeAreaClass}`}>
+        <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ${iosNavSafeAreaClass}`}>
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -2229,11 +2921,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   }
 
   return (
-    <div className={`h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ios-safe-area ${
+    <div className={`reader-viewport overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${iosSafeAreaClass} ${
       isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
     }`}>
       {/* Modern Reader Header - Kompakt */}
-      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ios-nav-safe-area ${
+      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ${iosNavSafeAreaClass} ${
         isFullscreen ? 'hidden' : ''
       }`}>
         <div className="max-w-7xl mx-auto px-4 py-3">
@@ -2334,6 +3026,17 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                        >
                         <Bookmark className="w-4 h-4" />
                         <span>{t('reader.bookmarks')} ({bookmarks.length})</span>
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          setShowSearch(true)
+                          setShowMenu(false)
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                      >
+                        <Search className="w-4 h-4" />
+                        <span>{t('reader.search')}</span>
                       </button>
                       
                       <button
@@ -2503,6 +3206,170 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         />
       )}
 
+      {/* Search Panel */}
+      {showSearch && !isFullscreen && (
+        <div className="search-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <Search className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                  {t('reader.search')}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowSearch(false)}
+                className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
+                title={t('common.close')}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-start">
+              <div className="space-y-3 md:col-span-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('reader.search')}
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          void handleSearchSubmit()
+                        }
+                      }}
+                      placeholder={t('reader.searchPlaceholder')}
+                      inputMode="search"
+                      className="w-full px-3 py-2 pr-8 rounded-lg border border-gray-200 dark:border-dark-700 bg-white/80 dark:bg-dark-800/80 text-base md:text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/60"
+                      style={{ fontSize: '16px' }}
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-dark-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex items-center justify-center"
+                        title={t('common.clear') || 'Temizle'}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handlePasteIntoSearch()}
+                    className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-dark-800 text-xs md:text-sm text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-dark-700 hover:bg-gray-200 dark:hover:bg-dark-700 transition-colors flex items-center justify-center"
+                  >
+                    <Clipboard className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => void handleSearchSubmit()}
+                    className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-md hover:shadow-lg transition-colors"
+                    disabled={isSearchingText && searchScope === 'text'}
+                  >
+                    {t('reader.search')}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    onClick={() => setSearchScope('toc')}
+                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                      searchScope === 'toc'
+                        ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
+                        : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
+                    }`}
+                  >
+                    {t('reader.searchInHeadings')}
+                  </button>
+                  <button
+                    onClick={() => setSearchScope('text')}
+                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                      searchScope === 'text'
+                        ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
+                        : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
+                    }`}
+                  >
+                    {t('reader.searchInBook')}
+                  </button>
+                </div>
+
+                {searchScope === 'text' && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('reader.searchMinChars')}
+                  </p>
+                )}
+              </div>
+
+              <div className="md:col-span-2 space-y-3">
+                {searchScope === 'toc' && (
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {filteredToc.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {searchQuery.trim()
+                          ? t('reader.searchNoResults')
+                          : t('reader.searchPlaceholder')}
+                      </p>
+                    ) : (
+                      filteredToc.map((item: any, index: number) => (
+                        <button
+                          key={`${item.id || item.href || index}`}
+                          onClick={() => handleTocItemClick(item)}
+                          className="w-full text-left px-3 py-2 rounded-lg bg-white/70 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/40 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                        >
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            {item.label}
+                          </p>
+                          {item.fullLabel && item.fullLabel !== item.label && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {item.fullLabel}
+                            </p>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {searchScope === 'text' && (
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {isSearchingText ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {t('reader.searching')}
+                      </p>
+                    ) : textSearchResults.length === 0 ? (
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {searchQuery.trim()
+                          ? t('reader.searchNoResults')
+                          : t('reader.searchPlaceholder')}
+                      </p>
+                    ) : (
+                      textSearchResults.map((result) => (
+                        <button
+                          key={result.id}
+                          onClick={() => handleTextSearchResultClick(result)}
+                          className="w-full text-left px-3 py-2 rounded-lg bg-white/70 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/40 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                        >
+                          <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">
+                            {result.chapterTitle}
+                          </p>
+                          <p className="text-sm text-gray-800 dark:text-gray-100 line-clamp-2">
+                            {result.snippet}
+                          </p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modern Settings Panel */}
       {showSettings && !isFullscreen && (
         <div className="settings-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
@@ -2629,6 +3496,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
               locationChanged={locationChanged}
               getRendition={onReaderReady}
               epubInitOptions={epubInitOptions}
+              readerStyles={fullscreenReaderStyles}
               tocChanged={(toc: any) => {
                 console.log('TOC değişti:', toc)
                 setToc(toc || [])
@@ -2660,11 +3528,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           </button>
         </div>
 
-
       </div>
 
       {/* Mobile Bottom Navigation - Kompakt */}
-      <div className={`md:hidden bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-t border-white/30 dark:border-dark-700/30 shadow-lg transition-all duration-300 ${
+      <div
+        ref={bottomNavRef}
+        className={`md:hidden flex-shrink-0 bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-t border-white/30 dark:border-dark-700/30 shadow-lg transition-all duration-300 z-30 ${iosBottomSafeAreaClass} ${
         isFullscreen ? 'hidden' : ''
       }`}>
         <div className="px-4 py-2">
@@ -2848,3 +3717,4 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
 }
 
 export default EpubReader
+
