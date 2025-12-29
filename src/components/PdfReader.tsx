@@ -20,9 +20,10 @@ interface PdfReaderProps {
   onBackToLibrary: () => void
   isDarkMode?: boolean
   toggleDarkMode?: () => void
+  initialLocation?: string
 }
 
-export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode }) => {
+export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode, initialLocation }) => {
   const { t } = useTranslation()
   const [numPages, setNumPages] = useState<number>(0)
   const [currentPage, setCurrentPage] = useState<number>(1)
@@ -68,16 +69,32 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
   useEffect(() => {
     const init = async () => {
       try {
-        const progress = await getReadingProgress(userId, bookId)
-        if (progress && progress.current_location) {
-          const match = progress.current_location.match(/page:(\d+)/)
-          if (match) {
-            const savedPage = parseInt(match[1], 10) || 1
-            setCurrentPage(savedPage)
-            // Viewer'ı savedPage ile başlatmak için remount et
-            setViewerKey(Date.now())
-            savedPageRef.current = savedPage
+        let startPage: number | null = null
+
+        // Öncelik: dışarıdan verilen başlangıç konumu (örn. global yer imi listesinden)
+        if (initialLocation) {
+          const locMatch = initialLocation.match(/page:(\d+)/)
+          if (locMatch) {
+            startPage = parseInt(locMatch[1], 10) || 1
           }
+        }
+
+        // Eğer dışarıdan konum verilmemişse, kayıtlı ilerlemeyi kullan
+        if (!startPage) {
+          const progress = await getReadingProgress(userId, bookId)
+          if (progress && progress.current_location) {
+            const match = progress.current_location.match(/page:(\d+)/)
+            if (match) {
+              startPage = parseInt(match[1], 10) || 1
+            }
+          }
+        }
+
+        if (startPage && startPage > 0) {
+          setCurrentPage(startPage)
+          // Viewer'ı startPage ile başlatmak için remount et
+          setViewerKey(Date.now())
+          savedPageRef.current = startPage
         }
         // Bookmark'ları yükle
         const userBookmarks = await getBookmarks(userId, bookId)
@@ -94,7 +111,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
       setLoading(false)
     }
     init()
-  }, [userId, bookId])
+  }, [userId, bookId, initialLocation])
 
   // Mevcut sayfa için bookmark durumunu güncelle
   useEffect(() => {

@@ -29,6 +29,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
   const loadUserDetails = async () => {
     try {
       setLoading(true)
+      setError(null)
       
       // Kullanıcı detaylarını getir
       const { data: userData, error: userError } = await supabase
@@ -54,7 +55,6 @@ export const Profile: React.FC<ProfileProps> = ({ user, onBackToLibrary }) => {
         .eq('is_active', true)
 
       if (booksError) throw booksError
-
       const totalAccessibleBooks = accessibleBooks?.length || 0
 
       setUserDetails({

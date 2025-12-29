@@ -34,6 +34,24 @@ export interface Highlight {
   updated_at: string
 }
 
+export interface BookmarkWithBook extends Bookmark {
+  books?: {
+    id: string
+    title: string
+    author: string
+    cover_image?: string
+  }
+}
+
+export interface HighlightWithBook extends Highlight {
+  books?: {
+    id: string
+    title: string
+    author: string
+    cover_image?: string
+  }
+}
+
 // Okuma ilerlemesini kaydet
 export const saveReadingProgress = async (
   userId: string,
@@ -354,10 +372,44 @@ export const deleteHighlight = async (highlightId: string): Promise<boolean> => 
   }
 }
 
+// Kullanıcının tüm bookmark'larını getir (tüm kitaplardan)
+export const getUserBookmarks = async (
+  userId: string
+): Promise<BookmarkWithBook[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('bookmarks')
+      .select(`
+        *,
+        books:book_id (
+          id,
+          title,
+          author,
+          cover_image
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      // Tablo bulunamadı hatası varsa sessizce geç
+      if (error.code === '42P01' || error.message.includes('relation "public.bookmarks" does not exist')) {
+        console.warn('bookmarks tablosu bulunamadı')
+        return []
+      }
+      throw error
+    }
+    return (data as BookmarkWithBook[]) || []
+  } catch (error) {
+    console.error('Kullanıcı bookmark\'ları getirme hatası:', error)
+    return []
+  }
+}
+
 // Kullanıcının tüm highlight'larını getir (tüm kitaplardan)
 export const getUserHighlights = async (
   userId: string
-): Promise<Highlight[]> => {
+): Promise<HighlightWithBook[]> => {
   try {
     const { data, error } = await supabase
       .from('highlights')
@@ -381,7 +433,7 @@ export const getUserHighlights = async (
       }
       throw error
     }
-    return data || []
+    return (data as HighlightWithBook[]) || []
   } catch (error) {
     console.error('Kullanıcı highlight\'ları getirme hatası:', error)
     return []

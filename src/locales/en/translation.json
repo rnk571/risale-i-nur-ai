@@ -10,7 +10,8 @@
     "user": "User",
     "toLibrary": "Back to Library",
     "adminPanel": "Admin Panel",
-    "profile": "My Profile"
+    "profile": "My Profile",
+    "annotations": "My Bookmarks & Highlights"
   },
   "common": {
     "loading": "Loading...",
@@ -147,7 +148,26 @@
     "confirmPlaceholder": "HESABIMI SIL",
     "deleting": "Deleting...",
     "deleted": "Your account has been completely deleted. Signing out...",
-    "confirmTextError": "Enter the confirmation text correctly"
+    "confirmTextError": "Enter the confirmation text correctly",
+    "bookmarksTitle": "My Bookmarks",
+    "bookmarksSubtitle": "View all bookmarks from all books in a single list.",
+    "bookmarksEmpty": "You haven't added any bookmarks yet.",
+    "bookmarksTable": {
+      "book": "Book",
+      "note": "Note / Description",
+      "date": "Date",
+      "unknownBook": "Unknown Book"
+    },
+    "highlightsTitle": "My Highlights",
+    "highlightsSubtitle": "View all highlights and notes from all books in a single list.",
+    "highlightsEmpty": "You haven't added any highlights yet.",
+    "highlightsTable": {
+      "book": "Book",
+      "text": "Highlighted Text",
+      "note": "Note",
+      "date": "Date",
+      "noNote": "No note has been added for this highlight."
+    }
   },
   "admin": {
     "title": "Admin Panel",

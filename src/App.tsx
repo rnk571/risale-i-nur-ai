@@ -8,11 +8,12 @@ import { EpubReader } from './components/EpubReader'
 import { PdfReader } from './components/PdfReader'
 import { AdminPanel } from './components/AdminPanel'
 import { Profile } from './components/Profile'
+import { Annotations } from './components/Annotations'
 
 import { useDarkMode } from './hooks/useDarkMode'
-import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon } from 'lucide-react'
+import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon, Bookmark } from 'lucide-react'
 
-type ViewMode = 'auth' | 'library' | 'reader' | 'admin' | 'profile'
+type ViewMode = 'auth' | 'library' | 'reader' | 'admin' | 'profile' | 'annotations'
 
 interface User {
   id: string
@@ -28,7 +29,7 @@ function App() {
   const getInitialViewMode = (): ViewMode => {
     try {
       const savedViewMode = localStorage.getItem('readigo_viewMode')
-      if (savedViewMode && ['auth', 'library', 'reader', 'admin', 'profile'].includes(savedViewMode)) {
+      if (savedViewMode && ['auth', 'library', 'reader', 'admin', 'profile', 'annotations'].includes(savedViewMode)) {
         return savedViewMode as ViewMode
       }
     } catch (error) {
@@ -54,6 +55,8 @@ function App() {
   const [user, setUser] = useState<User | null>(null)
   const [userRole, setUserRole] = useState<'user' | 'admin' | null>(null)
   const [selectedBook, setSelectedBook] = useState<Book | null>(getInitialSelectedBook)
+  const [initialReaderLocation, setInitialReaderLocation] = useState<string | null>(null)
+  const [initialHighlightCfi, setInitialHighlightCfi] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const { isDarkMode, toggleDarkMode } = useDarkMode()
@@ -196,6 +199,10 @@ function App() {
             // Profil sayfasındayken profil sayfasında kal
             setViewMode('profile')
             console.log('loadUserData - profile mode restored')
+          } else if (savedViewMode === 'annotations') {
+            // Notlar sayfasındayken aynı modda kal
+            setViewMode('annotations')
+            console.log('loadUserData - annotations mode restored')
           } else {
             setViewMode('library')
             console.log('loadUserData - library mode set')
@@ -237,15 +244,47 @@ function App() {
 
 
   const handleBookSelect = (book: Book) => {
+    setInitialReaderLocation(null)
+    setInitialHighlightCfi(null)
     setSelectedBook(book)
     setViewMode('reader')
   }
 
   const handleBackToLibrary = () => {
     setSelectedBook(null)
+    setInitialReaderLocation(null)
+    setInitialHighlightCfi(null)
     setViewMode('library')
     // localStorage'dan reader verilerini temizle
     localStorage.removeItem('readigo_selectedBook')
+  }
+
+  const openBookAtLocation = async (bookId: string, location: string, isHighlight: boolean = false) => {
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .eq('id', bookId)
+        .maybeSingle()
+
+      if (error || !data) {
+        console.error('Kitap yüklenirken hata:', error)
+        return
+      }
+
+      const book = data as Book
+      setSelectedBook(book)
+      if (isHighlight) {
+        setInitialReaderLocation(null)
+        setInitialHighlightCfi(location)
+      } else {
+        setInitialReaderLocation(location)
+        setInitialHighlightCfi(null)
+      }
+      setViewMode('reader')
+    } catch (err) {
+      console.error('Kitap açma hatası:', err)
+    }
   }
 
   const handleLogout = async () => {
@@ -368,8 +407,34 @@ function App() {
                             </button>
                           )}
                           
+                          {/* Annotations Button */}
+                          <button
+                            onClick={() => {
+                              setViewMode('annotations')
+                              setShowUserMenu(false)
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                          >
+                            <Bookmark className="w-4 h-4" />
+                            <span>{t('app.annotations')}</span>
+                          </button>
+                          
                           {/* Profile'dan Çıkış Butonu */}
                           {viewMode === 'profile' && (
+                            <button
+                              onClick={() => {
+                                setViewMode('library')
+                                setShowUserMenu(false)
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-white/60 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                            >
+                              <BookOpen className="w-4 h-4" />
+                              <span>{t('app.toLibrary')}</span>
+                            </button>
+                          )}
+                          
+                          {/* Annotations'dan Çıkış Butonu */}
+                          {viewMode === 'annotations' && (
                             <button
                               onClick={() => {
                                 setViewMode('library')
@@ -460,6 +525,7 @@ function App() {
               onBackToLibrary={handleBackToLibrary}
               isDarkMode={isDarkMode}
               toggleDarkMode={toggleDarkMode}
+              initialLocation={initialReaderLocation || undefined}
             />
           ) : (
             <EpubReader 
@@ -470,6 +536,8 @@ function App() {
               onBackToLibrary={handleBackToLibrary}
               isDarkMode={isDarkMode}
               toggleDarkMode={toggleDarkMode}
+              initialLocation={initialReaderLocation || undefined}
+              initialHighlightCfi={initialHighlightCfi || undefined}
             />
           )
         )}
@@ -488,6 +556,14 @@ function App() {
           <Profile 
             user={user}
             onBackToLibrary={() => setViewMode('library')}
+          />
+        )}
+        {viewMode === 'annotations' && user && (
+          <Annotations
+            user={user}
+            onBackToLibrary={() => setViewMode('library')}
+            onOpenBookmark={(bookId, location) => openBookAtLocation(bookId, location, false)}
+            onOpenHighlight={(bookId, cfiRange) => openBookAtLocation(bookId, cfiRange, true)}
           />
         )}
       </main>

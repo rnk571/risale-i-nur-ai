@@ -10,7 +10,8 @@
     "user": "Kullanıcı",
     "toLibrary": "Kütüphaneye Dön",
     "adminPanel": "Admin Paneli",
-    "profile": "Profilim"
+    "profile": "Profilim",
+    "annotations": "Yer İşaretlerim & Vurgulamalarım"
   },
   "common": {
     "loading": "Yükleniyor...",
@@ -151,7 +152,26 @@
     "confirmPlaceholder": "HESABIMI SIL",
     "deleting": "Siliniyor...",
     "deleted": "Hesabınız tamamen silindi. Çıkış yapılıyor...",
-    "confirmTextError": "Onay metnini doğru yazın"
+    "confirmTextError": "Onay metnini doğru yazın",
+    "bookmarksTitle": "Yer İşaretlerim",
+    "bookmarksSubtitle": "Tüm kitaplardan eklediğiniz yer işaretlerini tek listede görüntüleyin.",
+    "bookmarksEmpty": "Henüz yer işareti eklememişsiniz.",
+    "bookmarksTable": {
+      "book": "Kitap",
+      "note": "Not / Açıklama",
+      "date": "Tarih",
+      "unknownBook": "Bilinmeyen Kitap"
+    },
+    "highlightsTitle": "Vurgulamalarım",
+    "highlightsSubtitle": "Tüm kitaplardan aldığınız vurgulamaları ve notları tek listede görüntüleyin.",
+    "highlightsEmpty": "Henüz vurgulama eklememişsiniz.",
+    "highlightsTable": {
+      "book": "Kitap",
+      "text": "Vurgulanan Metin",
+      "note": "Not",
+      "date": "Tarih",
+      "noNote": "Bu vurgulama için not eklenmemiş."
+    }
   },
   "admin": {
     "title": "Admin Paneli",

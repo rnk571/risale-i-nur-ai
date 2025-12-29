@@ -16,6 +16,8 @@ interface EpubReaderProps {
   onBackToLibrary: () => void
   isDarkMode?: boolean
   toggleDarkMode?: () => void
+  initialLocation?: string
+  initialHighlightCfi?: string
 }
 
 interface TextSearchResult {
@@ -48,9 +50,9 @@ if (typeof window !== 'undefined' && (window as any).Capacitor) {
   }
 }
 
-export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode }) => {
+export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode, initialLocation, initialHighlightCfi }) => {
   const { t } = useTranslation()
-  const [location, setLocation] = useState<string | number>(0)
+  const [location, setLocation] = useState<string | number>(initialLocation || 0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -106,6 +108,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const isFullscreenRef = useRef<boolean>(false)
   const contentDocsRef = useRef<Set<Document>>(new Set())
   const searchHighlightCfiRef = useRef<string | null>(null)
+  const hasNavigatedToInitialHighlightRef = useRef<boolean>(false)
   
   useEffect(() => {
     isFullscreenRef.current = isFullscreen
@@ -394,45 +397,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       })
     }, 100)
   }, [isDarkMode])
-
-  const locationChanged = useCallback((epubcifi: string) => {
-    setLocation(epubcifi)
-    lastLocationRef.current = epubcifi
-    
-    // İlerleme yüzdesini ve sayfa bilgilerini hesapla
-    if (renditionRef.current) {
-      const rendition = renditionRef.current
-      const book = rendition.book
-      
-      // Mevcut sayfa bilgilerini al
-      try {
-        if (rendition.location) {
-          const location = rendition.location
-          if (location.start) {
-            // Mevcut bölüm bilgisini güncelle
-            const currentSpine = book.spine.get(location.start.href)
-            if (currentSpine) {
-              setCurrentChapter(currentSpine.navitem?.label || currentSpine.href || t('reader.unknownChapter'))
-            }
-            
-            // Mevcut sayfa ve toplam sayfa bilgilerini al (sadece mevcut bölüm için)
-            if (location.start.displayed && location.end.displayed) {
-              setCurrentPage(location.start.displayed.page || 1)
-              setTotalPages(location.start.displayed.total || 1)
-            }
-          }
-        }
-      } catch (error) {
-        console.warn('Sayfa bilgileri alınırken hata:', error)
-      }
-      
-      // İlerleme yüzdesini hesapla - Gelişmiş sistem
-      calculateAdvancedProgress(book, epubcifi)
-    }
-    
-    // Mevcut konumun bookmark olup olmadığını kontrol et
-    checkCurrentBookmark(epubcifi)
-  }, [userId, bookId])
 
   // Gelişmiş ilerleme hesaplama fonksiyonu
   const calculateAdvancedProgress = (book: any, cfi: string) => {
@@ -1000,6 +964,18 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 if (iframeDoc) {
                   console.log(`iframe ${iframeIndex} işleniyor...`)
                   
+                  // Önce bu highlight'a ait eski span'leri temizle (tekrarlı wrap'i önlemek için)
+                  try {
+                    const existingSpans = iframeDoc.querySelectorAll(`span.highlight-${highlight.id}, [data-highlight-id="${highlight.id}"]`)
+                    existingSpans.forEach((span: Element) => {
+                      const text = span.textContent || ''
+                      const textNode = iframeDoc.createTextNode(text)
+                      span.replaceWith(textNode)
+                    })
+                  } catch (cleanupErr) {
+                    console.log('Eski highlight span temizleme hatası:', cleanupErr)
+                  }
+
                   // Highlight için CSS style ekle
                   const highlightStyle = iframeDoc.createElement('style')
                   const colorStyle = colorMap[highlight.color]
@@ -1285,6 +1261,56 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
   }, [highlights, renderHighlights])
 
+  const locationChanged = useCallback((epubcifi: string) => {
+    setLocation(epubcifi)
+    lastLocationRef.current = epubcifi
+    
+    // İlerleme yüzdesini ve sayfa bilgilerini hesapla
+    if (renditionRef.current) {
+      const rendition = renditionRef.current
+      const book = rendition.book
+      
+      // Mevcut sayfa bilgilerini al
+      try {
+        if (rendition.location) {
+          const location = rendition.location
+          if (location.start) {
+            // Mevcut bölüm bilgisini güncelle
+            const currentSpine = book.spine.get(location.start.href)
+            if (currentSpine) {
+              setCurrentChapter(currentSpine.navitem?.label || currentSpine.href || t('reader.unknownChapter'))
+            }
+            
+            // Mevcut sayfa ve toplam sayfa bilgilerini al (sadece mevcut bölüm için)
+            if (location.start.displayed && location.end.displayed) {
+              setCurrentPage(location.start.displayed.page || 1)
+              setTotalPages(location.start.displayed.total || 1)
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Sayfa bilgileri alınırken hata:', error)
+      }
+      
+      // İlerleme yüzdesini hesapla - Gelişmiş sistem
+      calculateAdvancedProgress(book, epubcifi)
+    }
+    
+    // Mevcut konumun bookmark olup olmadığını kontrol et
+    checkCurrentBookmark(epubcifi)
+
+    // Yeni bölüme/geçerli konuma geçildiğinde highlight'ları yeniden uygula
+    if (renditionRef.current && highlights.length > 0) {
+      setTimeout(() => {
+        try {
+          renderHighlights()
+        } catch (err) {
+          console.error('locationChanged highlight re-render hatası:', err)
+        }
+      }, 600)
+    }
+  }, [checkCurrentBookmark, calculateAdvancedProgress, highlights, renderHighlights, t])
+
   // Highlight fonksiyonları
   const handleSaveHighlight = async (color: string, note: string) => {
     if (!pendingHighlight || !userId || !bookId) return
@@ -1539,7 +1565,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       
       try {
         // CFI range'i temizle ve parse et
-        let cleanCfiRange = highlight.cfi_range
+        let cleanCfiRange = (highlight.cfi_range || '').trim()
+
+        // Eğer CFI bir range ise (ör: epubcfi(...):0,38), sadece ilk epubcfi(...) kısmını al
+        const rangeMatch = cleanCfiRange.match(/^(epubcfi\([^)]*\))/)
+        if (rangeMatch && rangeMatch[1]) {
+          cleanCfiRange = rangeMatch[1]
+        }
         
         // iOS CFI formatını kontrol et
         const isIOSFormat = cleanCfiRange.includes('!/4/4[id') && cleanCfiRange.includes('):')
@@ -1609,22 +1641,25 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           
           // Web CFI için de temizleme yap
           try {
-            // CFI'yi temizle ve navigation dene
-            let webCfi = cleanCfiRange
-            
-            // Eğer epubcfi() wrapper'ı varsa kaldır
-            if (webCfi.startsWith('epubcfi(') && webCfi.endsWith(')')) {
-              webCfi = webCfi.slice(8, -1) // epubcfi( ve ) kaldır
-            }
-            
-            console.log('Web CFI temizlendi:', webCfi)
+            // CFI'yi kullan ve navigation dene
+            const webCfi = cleanCfiRange
+            console.log('Web CFI kullanılacak:', webCfi)
             renditionRef.current.display(webCfi)
           } catch (webError) {
             console.error('Web CFI navigation hatası, orijinal ile deneniyor:', webError)
             renditionRef.current.display(cleanCfiRange)
           }
         }
-        
+
+        // Navigasyon sonrası highlight'ları yeniden render et (yeni bölüm iframe'leri için)
+        setTimeout(() => {
+          try {
+            renderHighlights()
+          } catch (reErr) {
+            console.error('Highlight re-render hatası:', reErr)
+          }
+        }, 600)
+
         // Highlight panel'i kapat
         setShowHighlights(false)
         
@@ -1632,73 +1667,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         if (haptics) {
           haptics.impact({ style: 'light' }).catch(() => {})
         }
-        
-        // Highlight'ı görsel olarak vurgula (eğer bulunursa)
-        setTimeout(() => {
-          try {
-            const iframes = document.querySelectorAll('.react-reader-container iframe')
-            iframes.forEach((iframe: any) => {
-              try {
-                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-                if (iframeDoc) {
-                  // Highlight'ı bul ve vurgula
-                  const highlightElement = iframeDoc.querySelector(`[data-highlight-id="${highlight.id}"]`)
-                  if (highlightElement) {
-                    console.log('Highlight element bulundu, vurgulanıyor:', highlightElement)
-                    
-                    // Scroll to element
-                    highlightElement.scrollIntoView({ 
-                      behavior: 'smooth', 
-                      block: 'center',
-                      inline: 'center'
-                    })
-                    
-                    // Geçici vurgulama efekti
-                    highlightElement.style.transform = 'scale(1.1)'
-                    highlightElement.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)'
-                    highlightElement.style.transition = 'all 0.3s ease'
-                    
-                    setTimeout(() => {
-                      highlightElement.style.transform = 'scale(1)'
-                      highlightElement.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.1)'
-                    }, 2000)
-                  } else {
-                    // Highlight element bulunamadı, text ile ara
-                    console.log('Highlight element bulunamadı, text ile aranıyor...')
-                    const textElements = iframeDoc.querySelectorAll('*')
-                    for (const element of textElements) {
-                      if (element.textContent && element.textContent.includes(highlight.selected_text)) {
-                        console.log('Text ile highlight bulundu:', element)
-                        
-                        // Scroll to element
-                        element.scrollIntoView({ 
-                          behavior: 'smooth', 
-                          block: 'center',
-                          inline: 'center'
-                        })
-                        
-                        // Geçici vurgulama efekti
-                        element.style.outline = '3px solid #3b82f6'
-                        element.style.outlineOffset = '2px'
-                        element.style.transition = 'all 0.3s ease'
-                        
-                        setTimeout(() => {
-                          element.style.outline = 'none'
-                        }, 3000)
-                        
-                        break
-                      }
-                    }
-                  }
-                }
-              } catch (error) {
-                console.log('Highlight vurgulama hatası:', error)
-              }
-            })
-          } catch (error) {
-            console.log('Highlight vurgulama genel hatası:', error)
-          }
-        }, 1000)
         
       } catch (error) {
         console.error('Highlight navigation genel hatası:', error)
@@ -1783,8 +1751,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
           const progress = await getReadingProgress(userId, bookId)
           if (progress) {
             setProgressPercentage(progress.progress_percentage)
-            // İlerleme konumuna git
-            if (renditionRef.current && progress.current_location) {
+            // Eğer dışarıdan başlangıç konumu belirtilmemişse, ilerleme konumuna git
+            if (!initialLocation && renditionRef.current && progress.current_location) {
               renditionRef.current.display(progress.current_location)
             }
           } else {
@@ -1811,7 +1779,20 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     }
 
     loadUserData()
-  }, [userId, bookId, blobUrl])
+  }, [userId, bookId, blobUrl, initialLocation])
+
+  // Global listeden gelen ilk vurgulama için, highlight'lar yüklendikten sonra
+  // aynı handleHighlightClick mantığını kullanarak navigate et
+  useEffect(() => {
+    if (!initialHighlightCfi || hasNavigatedToInitialHighlightRef.current) return
+    if (!highlights || highlights.length === 0) return
+
+    const target = highlights.find(h => h.cfi_range === initialHighlightCfi)
+    if (!target) return
+
+    hasNavigatedToInitialHighlightRef.current = true
+    handleHighlightClick(target)
+  }, [initialHighlightCfi, highlights])
 
   const goToNext = () => {
     if (renditionRef.current) {
