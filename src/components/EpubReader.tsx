@@ -102,6 +102,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const iosLastSelectionChangeTimeRef = useRef<number>(0)
   const iosMenuShownForSelectionRef = useRef<boolean>(false)
   const lastLocationRef = useRef<string | number>(0)
+  const lastWindowHeightRef = useRef<number | null>(null)
   const tocRef = useRef<any>(null)
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
@@ -210,6 +211,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   // Sayfa bilgileri için yeni state'ler
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
+  const [pageInput, setPageInput] = useState<string>('')
   const [currentChapter, setCurrentChapter] = useState('')
   const [toc, setToc] = useState<any[]>([])
   const [lastSelectedText, setLastSelectedText] = useState<string>('')
@@ -755,6 +757,17 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                 })
               }
               setShowContextMenu(true)
+
+              // Android'de: seçim sonrası sayfa konumunun bozulmasını engellemek için
+              // bulunduğumuz CFI konumunu tekrar yükle (özellikle bazı bölümlerde
+              // sayfanın yarısının önceki, yarısının sonraki sayfa görünmesi hatasını azaltmak için)
+              if (isAndroid && renditionRef.current && lastLocationRef.current) {
+                try {
+                  renditionRef.current.display(lastLocationRef.current)
+                } catch (err) {
+                  console.log('Android selection sonrası display hatası:', err)
+                }
+              }
             } catch {
               setContextMenuPosition({
                 x: window.innerWidth / 2,
@@ -915,16 +928,30 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         console.warn('TOC yüklenirken hata:', error)
       })
 
-      // Locations'ı oluştur (ilerleme hesaplama için)
-      rendition.book.ready.then(() => {
-        return rendition.book.locations.generate(1024) // 1024 karakterde bir konum oluştur
-      }).then(() => {
-        console.log('Locations oluşturuldu')
-        // Locations hazır olduğunda highlight'ları render et
-        renderHighlights()
-      }).catch((error: any) => {
-        console.warn('Locations oluşturulurken hata:', error)
-      })
+      // Locations'ı oluştur (ilerleme hesaplama ve sayfa navigasyonu için)
+      rendition.book.ready
+        .then(() => {
+          return rendition.book.locations.generate(1024) // 1024 karakterde bir konum oluştur
+        })
+        .then(() => {
+          console.log('Locations oluşturuldu')
+          try {
+            const locations = rendition.book.locations
+            if (locations && typeof locations.length === 'function') {
+              const total = locations.length()
+              if (typeof total === 'number' && !isNaN(total) && total > 0) {
+                setTotalPages(total)
+              }
+            }
+          } catch (err) {
+            console.warn('Toplam sayfa sayısı hesaplanırken hata:', err)
+          }
+          // Locations hazır olduğunda highlight'ları render et
+          renderHighlights()
+        })
+        .catch((error: any) => {
+          console.warn('Locations oluşturulurken hata:', error)
+        })
     }
     
     console.log('=== READER READY TAMAMLANDI ===')
@@ -1270,22 +1297,42 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
       const rendition = renditionRef.current
       const book = rendition.book
       
-      // Mevcut sayfa bilgilerini al
       try {
+        // Mevcut sayfa/bölüm bilgilerini al
         if (rendition.location) {
           const location = rendition.location
           if (location.start) {
             // Mevcut bölüm bilgisini güncelle
             const currentSpine = book.spine.get(location.start.href)
             if (currentSpine) {
-              setCurrentChapter(currentSpine.navitem?.label || currentSpine.href || t('reader.unknownChapter'))
+              setCurrentChapter(
+                currentSpine.navitem?.label ||
+                  currentSpine.href ||
+                  t('reader.unknownChapter')
+              )
             }
-            
-            // Mevcut sayfa ve toplam sayfa bilgilerini al (sadece mevcut bölüm için)
-            if (location.start.displayed && location.end.displayed) {
-              setCurrentPage(location.start.displayed.page || 1)
-              setTotalPages(location.start.displayed.total || 1)
+          }
+        }
+
+        // Global sayfa ve toplam sayfa bilgilerini al (locations API ile)
+        if (book?.locations && typeof book.locations.length === 'function' && book.locations.length()) {
+          try {
+            const total = book.locations.length()
+            if (typeof total === 'number' && !isNaN(total) && total > 0) {
+              if (total !== totalPages) {
+                setTotalPages(total)
+              }
+              const percentage = book.locations.percentageFromCfi(epubcifi)
+              if (typeof percentage === 'number' && !isNaN(percentage)) {
+                let page = Math.round(percentage * total)
+                if (!page || page < 1) page = 1
+                if (page > total) page = total
+                setCurrentPage(page)
+                setPageInput(String(page))
+              }
             }
+          } catch (pageError) {
+            console.warn('Global sayfa bilgileri alınırken hata:', pageError)
           }
         }
       } catch (error) {
@@ -1309,7 +1356,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
         }
       }, 600)
     }
-  }, [checkCurrentBookmark, calculateAdvancedProgress, highlights, renderHighlights, t])
+  }, [checkCurrentBookmark, calculateAdvancedProgress, highlights, renderHighlights, t, totalPages])
 
   // Highlight fonksiyonları
   const handleSaveHighlight = async (color: string, note: string) => {
@@ -1803,6 +1850,43 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
   const goToPrevious = () => {
     if (renditionRef.current) {
       renditionRef.current.prev()
+    }
+  }
+
+  const goToPage = (page: number) => {
+    if (!renditionRef.current || !page) return
+
+    try {
+      const book = (renditionRef.current as any).book
+      const locations = book?.locations
+
+      if (!locations || typeof locations.length !== 'function' || !locations.length()) {
+        return
+      }
+
+      const total = locations.length()
+      if (!total || isNaN(total)) return
+
+      const clampedPage = Math.max(1, Math.min(total, Math.floor(page)))
+      const percentage = (clampedPage - 0.5) / total
+
+      const cfi =
+        typeof locations.cfiFromPercentage === 'function'
+          ? locations.cfiFromPercentage(percentage)
+          : null
+
+      if (cfi) {
+        renditionRef.current.display(cfi)
+      }
+    } catch (error) {
+      console.error('Sayfaya gitme hatası:', error)
+    }
+  }
+
+  const submitPageInput = () => {
+    const value = parseInt(pageInput, 10)
+    if (!isNaN(value)) {
+      goToPage(value)
     }
   }
 
@@ -2507,10 +2591,50 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
     return () => window.clearTimeout(id)
   }, [isFullscreen, applyReaderInsets])
 
-  // Window resize olayını dinle ve inset/padding'i güncelle
+  // Window resize olayını dinle ve inset/padding + layout'u güncelle
   useEffect(() => {
     const handleResize = () => {
-      window.setTimeout(applyReaderInsets, 100)
+      // Android'de klavye açılıp kapanırken window.resize çok sık geliyor ve
+      // epub.js layout'unu bozup sayfanın beyaz kalmasına sebep olabiliyor.
+      // Bu yüzden Android cihazlarda resize sırasında hiçbir şey yapmıyoruz.
+      const isAndroid =
+        typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+      if (isAndroid) return
+
+      const newHeight = window.innerHeight
+      const prevHeight = lastWindowHeightRef.current
+      lastWindowHeightRef.current = newHeight
+
+      window.setTimeout(() => {
+        applyReaderInsets()
+
+        // Android'de klavye açılıp kapandığında bazen sayfa beyaz kalabiliyor.
+        // Yükseklik ciddi şekilde değiştiyse, mevcut konumu yeniden display ederek
+        // sayfayı zorla yeniden çiziyoruz.
+        try {
+          const rendition = renditionRef.current
+          if (!rendition) return
+
+          if (rendition.resize) {
+            rendition.resize()
+          }
+
+          if (
+            typeof prevHeight === 'number' &&
+            Math.abs(newHeight - prevHeight) > 120 // klavye kaynaklı büyük değişim eşiği
+          ) {
+            const currentLoc =
+              (rendition.location &&
+                (rendition.location.start?.cfi ||
+                  (rendition.location as any).cfi)) ||
+              lastLocationRef.current
+
+            if (currentLoc) {
+              rendition.display(currentLoc)
+            }
+          }
+        } catch {}
+      }, 140)
     }
 
     window.addEventListener('resize', handleResize)
@@ -2948,6 +3072,30 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
                   ></div>
                 </div>
               </div>
+
+              {/* Page Input - Desktop & Tablet (butonsuz) */}
+              {totalPages > 0 && (
+                <div className="hidden sm:flex items-center gap-1">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    {t('reader.pageShort')} 1-{totalPages}
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    inputMode="numeric"
+                    value={pageInput}
+                    onChange={(e) => setPageInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        submitPageInput()
+                      }
+                    }}
+                    className="w-16 text-[16px] px-2 py-1 rounded-lg border border-gray-200 dark:border-dark-700 bg-white/80 dark:bg-dark-800/80 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  />
+                </div>
+              )}
 
               {/* Dark Mode Toggle */}
               {toggleDarkMode && (
@@ -3528,13 +3676,32 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
               <span className="text-xs">Önceki</span>
             </button>
             
-            <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-              <span>%{progressPercentage}</span>
+            <div className="flex flex-col items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
               {totalPages > 0 && (
-                <>
-                  <span>•</span>
-                  <span>{currentPage}/{totalPages}</span>
-                </>
+                <form
+                  className="flex items-center gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    submitPageInput()
+                  }}
+                >
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    {t('reader.pageShort')}
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    inputMode="numeric"
+                    value={pageInput}
+                    onChange={(e) => setPageInput(e.target.value)}
+                    className="w-12 text-[16px] px-1.5 py-1 rounded-lg border border-gray-200 dark:border-dark-700 bg-white/80 dark:bg-dark-800/80 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    onBlur={submitPageInput}
+                  />
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    /{totalPages}
+                  </span>
+                </form>
               )}
             </div>
             
@@ -3565,14 +3732,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, book
               )}
             </div>
             <div className="flex items-center gap-3">
-              <span>%{progressPercentage}</span>
               {totalPages > 0 && (
                 <>
-                  <span>•</span>
                   <span>{currentPage}/{totalPages}</span>
+                  <span>•</span>
                 </>
               )}
-              <span>•</span>
               <span>{bookmarks.length} yer işareti</span>
             </div>
           </div>
