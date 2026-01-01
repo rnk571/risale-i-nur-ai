@@ -50,7 +50,17 @@ if (typeof window !== 'undefined' && (window as any).Capacitor) {
   }
 }
 
-export const EpubReader: React.FC<EpubReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode, initialLocation, initialHighlightCfi }) => {
+export const EpubReader: React.FC<EpubReaderProps> = ({
+  bookUrl,
+  bookTitle,
+  bookId,
+  userId,
+  onBackToLibrary,
+  isDarkMode = false,
+  toggleDarkMode,
+  initialLocation,
+  initialHighlightCfi
+}) => {
   const { t } = useTranslation()
   const [location, setLocation] = useState<string | number>(initialLocation || 0)
   const [isLoading, setIsLoading] = useState(true)

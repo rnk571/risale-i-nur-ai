@@ -9,11 +9,12 @@ import { PdfReader } from './components/PdfReader'
 import { AdminPanel } from './components/AdminPanel'
 import { Profile } from './components/Profile'
 import { Annotations } from './components/Annotations'
+import { AudioBookPage } from './components/AudioBookPage'
 
 import { useDarkMode } from './hooks/useDarkMode'
-import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon, Bookmark } from 'lucide-react'
+import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon, Bookmark, Headphones } from 'lucide-react'
 
-type ViewMode = 'auth' | 'library' | 'reader' | 'admin' | 'profile' | 'annotations'
+type ViewMode = 'auth' | 'library' | 'reader' | 'audio' | 'admin' | 'profile' | 'annotations'
 
 interface User {
   id: string
@@ -29,7 +30,7 @@ function App() {
   const getInitialViewMode = (): ViewMode => {
     try {
       const savedViewMode = localStorage.getItem('readigo_viewMode')
-      if (savedViewMode && ['auth', 'library', 'reader', 'admin', 'profile', 'annotations'].includes(savedViewMode)) {
+      if (savedViewMode && ['auth', 'library', 'reader', 'audio', 'admin', 'profile', 'annotations'].includes(savedViewMode)) {
         return savedViewMode as ViewMode
       }
     } catch (error) {
@@ -60,6 +61,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const { isDarkMode, toggleDarkMode } = useDarkMode()
+  const [bookOpenChoice, setBookOpenChoice] = useState<Book | null>(null)
 
   // iOS cihaz tespiti (safe area sınıflarını sadece iOS'ta uygulamak için)
   const isIOSDevice =
@@ -246,8 +248,16 @@ function App() {
   const handleBookSelect = (book: Book) => {
     setInitialReaderLocation(null)
     setInitialHighlightCfi(null)
-    setSelectedBook(book)
-    setViewMode('reader')
+
+    // Transkript olmasa bile ses dosyası varsa sesli kitap modu sunulsun
+    const hasAudio = !!(book as any).audio_file_path
+
+    if (hasAudio) {
+      setBookOpenChoice(book)
+    } else {
+      setSelectedBook(book)
+      setViewMode('reader')
+    }
   }
 
   const handleBackToLibrary = () => {
@@ -321,7 +331,7 @@ function App() {
   return (
     <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ${iosSafeAreaClass}`}>
       {/* Modern Header */}
-      {viewMode !== 'reader' && (
+      {viewMode !== 'reader' && viewMode !== 'audio' && (
         <header className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg sticky top-0 z-50 ${iosNavSafeAreaClass}`}>
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
@@ -509,11 +519,85 @@ function App() {
           <Auth onAuthSuccess={handleAuthSuccess} isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} />
         )}
         {viewMode === 'library' && (
-          <BookLibrary 
-            onBookSelect={handleBookSelect} 
-            userId={user?.id} 
-            userRole={userRole}
-          />
+          <>
+            <BookLibrary 
+              onBookSelect={handleBookSelect} 
+              userId={user?.id} 
+              userRole={userRole}
+            />
+
+            {bookOpenChoice && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                <div className="w-full max-w-md mx-4 bg-white dark:bg-dark-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-dark-700 overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-200 dark:border-dark-700">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-1">
+                      {bookOpenChoice.title}
+                    </p>
+                    <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">
+                      {t('library.openModeTitle')}
+                    </h2>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      {t('library.openModeSubtitle')}
+                    </p>
+                  </div>
+                  <div className="px-5 py-4 space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedBook(bookOpenChoice)
+                        setViewMode('reader')
+                        setBookOpenChoice(null)
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-dark-700 bg-white dark:bg-dark-800 hover:bg-blue-50/60 dark:hover:bg-dark-700/80 transition-colors text-left"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-300 flex-shrink-0">
+                        <BookOpen className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {t('library.openAsText')}
+                        </div>
+                        <div className="text-[11px] text-gray-600 dark:text-gray-400">
+                          {t('library.openAsTextHint')}
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedBook(bookOpenChoice)
+                        setViewMode('audio')
+                        setBookOpenChoice(null)
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-blue-950/40 hover:bg-blue-100/90 dark:hover:bg-blue-900/60 transition-colors text-left"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white flex-shrink-0">
+                        <Headphones className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                          {t('library.openAsAudio')}
+                        </div>
+                        <div className="text-[11px] text-blue-800/80 dark:text-blue-200/80">
+                          {t('library.openAsAudioHint')}
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                  <div className="px-5 py-3 border-t border-gray-200 dark:border-dark-700 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setBookOpenChoice(null)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700"
+                    >
+                      {t('common.cancel')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
         {viewMode === 'reader' && selectedBook && (
           selectedBook.epub_file_path?.toLowerCase().endsWith('.pdf') ? (
@@ -540,6 +624,15 @@ function App() {
               initialHighlightCfi={initialHighlightCfi || undefined}
             />
           )
+        )}
+        {viewMode === 'audio' && selectedBook && user && (
+          <AudioBookPage
+            book={selectedBook}
+            userId={user.id}
+            onBackToLibrary={handleBackToLibrary}
+            isDarkMode={isDarkMode}
+            toggleDarkMode={toggleDarkMode}
+          />
         )}
         {viewMode === 'admin' && userRole === 'admin' && (
           <AdminPanel 

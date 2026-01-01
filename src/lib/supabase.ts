@@ -25,6 +25,10 @@ export interface Book {
   created_at: string
   updated_at: string
   is_active: boolean
+  // Sesli kitap alanları (opsiyonel)
+  audio_file_path?: string | null
+  audio_transcript_path?: string | null
+  audio_duration_seconds?: number | null
 }
 
 export interface User {

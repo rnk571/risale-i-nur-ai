@@ -23,7 +23,16 @@ interface PdfReaderProps {
   initialLocation?: string
 }
 
-export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId, userId, onBackToLibrary, isDarkMode = false, toggleDarkMode, initialLocation }) => {
+export const PdfReader: React.FC<PdfReaderProps> = ({
+  bookUrl,
+  bookTitle,
+  bookId,
+  userId,
+  onBackToLibrary,
+  isDarkMode = false,
+  toggleDarkMode,
+  initialLocation
+}) => {
   const { t } = useTranslation()
   const [numPages, setNumPages] = useState<number>(0)
   const [currentPage, setCurrentPage] = useState<number>(1)
@@ -629,7 +638,6 @@ export const PdfReader: React.FC<PdfReaderProps> = ({ bookUrl, bookTitle, bookId
           </div>
         )}
       </div>
-
 
       {/* Bottom Status Bar */}
       <div className={`hidden md:block bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border-t border-white/30 dark:border-dark-700/30 ${isFullscreen ? 'hidden' : ''}` }>

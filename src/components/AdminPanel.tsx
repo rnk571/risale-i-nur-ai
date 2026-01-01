@@ -202,6 +202,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
           language: (parsed.language === 'en' ? 'en' : 'tr') as 'tr' | 'en',
           is_public: !!parsed.is_public,
           epub_file: null as File | null, // File objeleri serialize edilemez
+          audio_file: null as File | null,
+          transcript_file: null as File | null,
           selectedUsers: Array.isArray(parsed.selectedUsers) ? parsed.selectedUsers : []
         }
       }
@@ -216,6 +218,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       language: 'tr' as 'tr' | 'en',
       is_public: false,
       epub_file: null as File | null,
+      audio_file: null as File | null,
+      transcript_file: null as File | null,
       selectedUsers: [] as string[]
     }
   }
@@ -235,6 +239,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
   const [formData, setFormData] = useState(getInitialFormData)
   const firstFieldRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const audioFileInputRef = useRef<HTMLInputElement | null>(null)
+  const transcriptFileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Filtre state'leri
   const [filters, setFilters] = useState<FilterState>(defaultFilters)
@@ -264,7 +270,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     try {
       const dataToSave = {
         ...formData,
-        epub_file: null // File objeleri serialize edilemez
+        epub_file: null, // File objeleri serialize edilemez
+        audio_file: null,
+        transcript_file: null
       }
       localStorage.setItem('admin_formData', JSON.stringify(dataToSave))
     } catch (error) {
@@ -410,6 +418,48 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     return { url: data.publicUrl, type: isPdf ? 'pdf' : 'epub' }
   }
 
+  const uploadAudioFile = async (file: File): Promise<string> => {
+    const fileExt = (file.name.split('.').pop() || '').toLowerCase()
+    const safeExt = fileExt || 'mp3'
+    const fileName = `${Math.random().toString(36).substring(2)}.${safeExt}`
+    const filePath = `books/audio/${fileName}`
+
+    const { error } = await supabase.storage
+      .from('audio-files')
+      .upload(filePath, file)
+
+    if (error) {
+      throw error
+    }
+
+    const { data } = supabase.storage
+      .from('audio-files')
+      .getPublicUrl(filePath)
+
+    return data.publicUrl
+  }
+
+  const uploadTranscriptFile = async (file: File): Promise<string> => {
+    const fileExt = (file.name.split('.').pop() || '').toLowerCase()
+    const safeExt = fileExt || 'json'
+    const fileName = `${Math.random().toString(36).substring(2)}.${safeExt}`
+    const filePath = `books/transcripts/${fileName}`
+
+    const { error } = await supabase.storage
+      .from('transcript-files')
+      .upload(filePath, file)
+
+    if (error) {
+      throw error
+    }
+
+    const { data } = supabase.storage
+      .from('transcript-files')
+      .getPublicUrl(filePath)
+
+    return data.publicUrl
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.title || !formData.author) return
@@ -425,6 +475,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         epubUrl = uploaded.url
       }
 
+      // Ses dosyası (opsiyonel)
+      let audioUrl = editingBook?.audio_file_path || null
+      if (formData.audio_file) {
+        audioUrl = await uploadAudioFile(formData.audio_file)
+      }
+
+      // Transkript dosyası (opsiyonel)
+      let transcriptUrl = editingBook?.audio_transcript_path || null
+      if (formData.transcript_file) {
+        transcriptUrl = await uploadTranscriptFile(formData.transcript_file)
+      }
+
       // Kitap veri gövdesi
       const bookData: any = {
         title: formData.title,
@@ -433,7 +495,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         cover_image: formData.cover_image,
         language: formData.language,
         is_public: !!formData.is_public,
-        epub_file_path: epubUrl
+        epub_file_path: epubUrl,
+        audio_file_path: audioUrl,
+        audio_transcript_path: transcriptUrl
       }
 
       let bookId: string
@@ -483,14 +547,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       }
 
       // Formu sıfırla
-       setFormData({
+      setFormData({
         title: '',
         author: '',
         description: '',
         cover_image: '',
         language: 'tr',
-         is_public: false,
+        is_public: false,
         epub_file: null,
+        audio_file: null,
+        transcript_file: null,
         selectedUsers: []
       })
       setEditingBook(null)
@@ -551,9 +617,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         author: book.author,
         description: book.description || '',
         cover_image: book.cover_image || '',
-          language: (book.language as 'tr' | 'en') || 'tr',
+        language: (book.language as 'tr' | 'en') || 'tr',
         is_public: !!book.is_public,
         epub_file: null,
+        audio_file: null,
+        transcript_file: null,
         selectedUsers: selectedUserIds
       })
       setEditingBook(book)
@@ -611,6 +679,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                 language: 'tr',
                 is_public: false,
                 epub_file: null,
+                audio_file: null,
+                transcript_file: null,
                 selectedUsers: []
               })
               setShowAddForm(true)
@@ -786,7 +856,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
 
                 {/* Dosya ve Erişim */}
                 <div className="space-y-4">
-                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t('admin.form.bookInfo')}</h3>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t('admin.form.bookInfo')}</h3>
+                  {/* EPUB/PDF Dosyası */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                       {t('admin.form.epubFile')}
@@ -817,6 +888,90 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                     </div>
                   </div>
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('admin.form.supportedFormats')}</p>
+
+                  {/* Sesli Kitap - Opsiyonel */}
+                  <div className="mt-4 space-y-3">
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {t('admin.form.audioSectionTitle')}
+                    </h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {t('admin.form.audioSectionHint')}
+                    </p>
+
+                    {/* Ses Dosyası */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {t('admin.form.audioFile')}
+                      </label>
+                      <div className="relative">
+                        <input
+                          ref={audioFileInputRef}
+                          type="file"
+                          accept="audio/*"
+                          onChange={(e) => setFormData({ ...formData, audio_file: e.target.files?.[0] || null })}
+                          className="w-full opacity-0 absolute inset-0 cursor-pointer"
+                          aria-label={t('admin.form.audioFile')}
+                          title={t('admin.form.audioFile')}
+                        />
+                        <div className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl text-gray-900 dark:text-gray-100 flex items-center justify-between">
+                          <span className="text-sm truncate">
+                            {formData.audio_file
+                              ? formData.audio_file.name
+                              : editingBook?.audio_file_path
+                                ? t('admin.form.audioFileExisting')
+                                : t('admin.form.noFile')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => audioFileInputRef.current?.click()}
+                            className="ml-3 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/70"
+                          >
+                            {t('admin.form.chooseFile')}
+                          </button>
+                        </div>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {t('admin.form.audioFileHint')}
+                      </p>
+                    </div>
+
+                    {/* Transkript Dosyası */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {t('admin.form.transcriptFile')}
+                      </label>
+                      <div className="relative">
+                        <input
+                          ref={transcriptFileInputRef}
+                          type="file"
+                          accept=".json,.txt,application/json"
+                          onChange={(e) => setFormData({ ...formData, transcript_file: e.target.files?.[0] || null })}
+                          className="w-full opacity-0 absolute inset-0 cursor-pointer"
+                          aria-label={t('admin.form.transcriptFile')}
+                          title={t('admin.form.transcriptFile')}
+                        />
+                        <div className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl text-gray-900 dark:text-gray-100 flex items-center justify-between">
+                          <span className="text-sm truncate">
+                            {formData.transcript_file
+                              ? formData.transcript_file.name
+                              : editingBook?.audio_transcript_path
+                                ? t('admin.form.transcriptFileExisting')
+                                : t('admin.form.noFile')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => transcriptFileInputRef.current?.click()}
+                            className="ml-3 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/70"
+                          >
+                            {t('admin.form.chooseFile')}
+                          </button>
+                        </div>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        {t('admin.form.transcriptFileHint')}
+                      </p>
+                    </div>
+                  </div>
 
                   <div className="flex items-center justify-between p-3 bg-white/50 dark:bg-dark-700/50 border border-gray-200 dark:border-dark-600/40 rounded-xl">
                     <div>
@@ -884,8 +1039,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                       description: '',
                       cover_image: '',
                       language: 'tr',
-        is_public: false,
+                      is_public: false,
                       epub_file: null,
+                      audio_file: null,
+                      transcript_file: null,
                       selectedUsers: []
                     })
                   }}
@@ -965,6 +1122,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
                                {((book as any).epub_file_path || '').toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}
                              </span>
+                             { (book as any).audio_file_path && (
+                               <span className="inline-flex items-center px-2 py-0.5 ml-1 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
+                                 AUDIO
+                               </span>
+                             )}
                            </div>
                           {book.description && (
                             <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">

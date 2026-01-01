@@ -54,7 +54,14 @@
     "notFound": "No Books Found",
     "notFoundSubtitle": "Change your search criteria and try again",
     "emptySubtitle": "Books added by the admin will appear here",
-    "clearSearch": "Clear Search"
+    "clearSearch": "Clear Search",
+    "audioBook": "Audio Book",
+    "openModeTitle": "How would you like to open this book?",
+    "openModeSubtitle": "You can read it as text or listen in audiobook mode with synchronized transcript.",
+    "openAsText": "Read as text",
+    "openAsTextHint": "Standard EPUB/PDF reading experience",
+    "openAsAudio": "Listen as audiobook",
+    "openAsAudioHint": "Audio + transcript with professional synchronized view"
   },
   "reader": {
     "loadingBook": "Loading Book",
@@ -123,7 +130,25 @@
       "searchNoResults": "No search results found",
       "searchError": "An error occurred while searching",
       "searchTooShort": "Please enter at least 2 characters to search"
-    }
+    },
+    "audioBook": "Audio Book",
+    "audioTranscriptLoading": "Loading transcript...",
+    "audioTranscriptReady": "Transcript loaded. Press play to start.",
+    "audioTranscriptEmpty": "There is no transcript available for this text. You can listen to the audio content without a transcript.",
+    "audioTranscriptError": "Failed to load transcript",
+    "audioSettings": "Settings",
+    "skipDuration": "Skip duration",
+    "playbackSpeeds": "Playback speeds",
+    "highlightColor": "Highlight color",
+    "highlightOpacity": "Highlight opacity",
+    "colorAmber": "Amber",
+    "colorYellow": "Yellow",
+    "colorBlue": "Blue",
+    "colorGreen": "Green",
+    "colorPink": "Pink",
+    "colorPurple": "Purple",
+    "colorOrange": "Orange",
+    "colorCyan": "Cyan"
   },
   "profile": {
     "title": "My Profile",
@@ -249,6 +274,14 @@
       "usersEmpty": "No users yet",
       "usersNotFound": "No users found",
       "usersHint": "If no user is selected, the book can only be seen by admin users.",
+      "audioSectionTitle": "Audiobook (Optional)",
+      "audioSectionHint": "If you upload an audio file and transcript, users can listen to the book while seeing the exact part being read on the screen.",
+      "audioFile": "Audio File",
+      "audioFileHint": "e.g. MP3, M4A... Used only for playback.",
+      "audioFileExisting": "An audio file is already attached (select a new file to replace)",
+      "transcriptFile": "Transcript File",
+      "transcriptFileHint": "Whisper-style JSON transcript. See the 'seslikitap' folder for an example.",
+      "transcriptFileExisting": "A transcript file is already attached (select a new file to replace)",
       "save": "Save",
       "saving": "Saving..."
     },
