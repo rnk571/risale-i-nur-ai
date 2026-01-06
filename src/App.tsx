@@ -25,7 +25,7 @@ interface User {
 function App() {
   const { t, i18n } = useTranslation()
 
-  
+
   // ViewMode'u localStorage'dan al veya varsayılan değer kullan
   const getInitialViewMode = (): ViewMode => {
     try {
@@ -103,10 +103,10 @@ function App() {
     const checkUser = async () => {
       try {
         setLoading(true)
-        
+
         // Önce mevcut session'ı kontrol et
         const { data: { session } } = await supabase.auth.getSession()
-        
+
         if (session?.user) {
           await loadUserData(session, false) // viewMode'u değiştirmeyi devre dışı bırak
           setLoading(false)
@@ -162,7 +162,7 @@ function App() {
         const { data: { session: newSession } } = await supabase.auth.getSession()
         userSession = newSession
       }
-      
+
       if (userSession?.user) {
         // Önce optimistik kullanıcıyı ayarla, mevcut admin'i düşürme
         const optimisticUser: User = {
@@ -172,17 +172,17 @@ function App() {
         }
         setUser(optimisticUser)
         setUserRole((prev) => (prev === 'admin' ? 'admin' : 'user'))
-        
+
         // Sadece belirli durumlarda viewMode'u değiştir
         if (shouldChangeViewMode) {
           // Eğer localStorage'da reader mode varsa ve selectedBook varsa, reader'da kal
           const savedViewMode = localStorage.getItem('readigo_viewMode')
           const savedBook = localStorage.getItem('readigo_selectedBook')
-          
+
           console.log('loadUserData - shouldChangeViewMode:', shouldChangeViewMode)
           console.log('loadUserData - savedViewMode:', savedViewMode)
           console.log('loadUserData - savedBook:', savedBook)
-          
+
           if (savedViewMode === 'reader' && savedBook) {
             try {
               const parsedBook = JSON.parse(savedBook)
@@ -212,7 +212,7 @@ function App() {
         } else {
           console.log('loadUserData - viewMode not changed (shouldChangeViewMode: false)')
         }
-        
+
         // Rolü arkaplanda getir ve güncelle
         supabase
           .from('users')
@@ -227,10 +227,10 @@ function App() {
           })
         return
       }
-      
+
       // Session yoksa hata
       setViewMode('auth')
-      
+
     } catch (error) {
       console.error('Kullanıcı verileri yüklenirken hata:', error)
       setViewMode('auth')
@@ -336,9 +336,9 @@ function App() {
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <img 
-                  src="/logo-512.png" 
-                  alt="App Logo" 
+                <img
+                  src="/logo-512.png"
+                  alt="App Logo"
                   className="w-10 h-10 rounded-xl shadow-lg object-cover"
                 />
                 <div>
@@ -391,17 +391,16 @@ function App() {
                               <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                                 {user.email}
                               </p>
-                              <span className={`inline-block text-xs px-2 py-1 rounded-full mt-1 ${
-                                userRole === 'admin' 
-                                  ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300' 
-                                  : 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                              }`}>
+                              <span className={`inline-block text-xs px-2 py-1 rounded-full mt-1 ${userRole === 'admin'
+                                ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300'
+                                : 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                }`}>
                                 {userRole === 'admin' ? t('app.admin') : t('app.user')}
                               </span>
                             </div>
                           </div>
                         </div>
-                        
+
                         <div className="p-2">
                           {/* Profile Button */}
                           {viewMode === 'library' && (
@@ -416,7 +415,7 @@ function App() {
                               <span>{t('app.profile')}</span>
                             </button>
                           )}
-                          
+
                           {/* Annotations Button */}
                           <button
                             onClick={() => {
@@ -428,7 +427,7 @@ function App() {
                             <Bookmark className="w-4 h-4" />
                             <span>{t('app.annotations')}</span>
                           </button>
-                          
+
                           {/* Profile'dan Çıkış Butonu */}
                           {viewMode === 'profile' && (
                             <button
@@ -442,7 +441,7 @@ function App() {
                               <span>{t('app.toLibrary')}</span>
                             </button>
                           )}
-                          
+
                           {/* Annotations'dan Çıkış Butonu */}
                           {viewMode === 'annotations' && (
                             <button
@@ -456,7 +455,7 @@ function App() {
                               <span>{t('app.toLibrary')}</span>
                             </button>
                           )}
-                          
+
                           {/* Admin Panel Button */}
                           {userRole === 'admin' && viewMode === 'library' && (
                             <button
@@ -470,7 +469,7 @@ function App() {
                               <span>{t('app.adminPanel')}</span>
                             </button>
                           )}
-                          
+
                           {/* Admin Panelden Çıkış Butonu */}
                           {userRole === 'admin' && viewMode === 'admin' && (
                             <button
@@ -488,9 +487,9 @@ function App() {
                               <span>{t('app.toLibrary')}</span>
                             </button>
                           )}
-                          
+
                           <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
-                          
+
                           {/* Logout Button */}
                           <button
                             onClick={() => {
@@ -520,9 +519,9 @@ function App() {
         )}
         {viewMode === 'library' && (
           <>
-            <BookLibrary 
-              onBookSelect={handleBookSelect} 
-              userId={user?.id} 
+            <BookLibrary
+              onBookSelect={handleBookSelect}
+              userId={user?.id}
               userRole={userRole}
             />
 
@@ -548,16 +547,16 @@ function App() {
                         setViewMode('reader')
                         setBookOpenChoice(null)
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-dark-700 bg-white dark:bg-dark-800 hover:bg-blue-50/60 dark:hover:bg-dark-700/80 transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-dark-700 bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700/80 hover:border-blue-200 dark:hover:border-blue-800 transition-all text-left group"
                     >
-                      <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-300 flex-shrink-0">
+                      <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 flex-shrink-0 group-hover:scale-110 transition-transform">
                         <BookOpen className="w-4 h-4" />
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                           {t('library.openAsText')}
                         </div>
-                        <div className="text-[11px] text-gray-600 dark:text-gray-400">
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400">
                           {t('library.openAsTextHint')}
                         </div>
                       </div>
@@ -570,16 +569,16 @@ function App() {
                         setViewMode('audio')
                         setBookOpenChoice(null)
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/80 dark:bg-blue-950/40 hover:bg-blue-100/90 dark:hover:bg-blue-900/60 transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-gray-200 dark:border-dark-700 bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700/80 hover:border-emerald-200 dark:hover:border-emerald-800 transition-all text-left group"
                     >
-                      <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white flex-shrink-0">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 flex-shrink-0 group-hover:scale-110 transition-transform">
                         <Headphones className="w-4 h-4" />
                       </div>
                       <div className="flex-1">
-                        <div className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                           {t('library.openAsAudio')}
                         </div>
-                        <div className="text-[11px] text-blue-800/80 dark:text-blue-200/80">
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400">
                           {t('library.openAsAudioHint')}
                         </div>
                       </div>
@@ -612,11 +611,11 @@ function App() {
               initialLocation={initialReaderLocation || undefined}
             />
           ) : (
-            <EpubReader 
-              bookUrl={selectedBook.epub_file_path} 
-              bookTitle={selectedBook.title} 
-              bookId={selectedBook.id} 
-              userId={user!.id} 
+            <EpubReader
+              bookUrl={selectedBook.epub_file_path}
+              bookTitle={selectedBook.title}
+              bookId={selectedBook.id}
+              userId={user!.id}
               onBackToLibrary={handleBackToLibrary}
               isDarkMode={isDarkMode}
               toggleDarkMode={toggleDarkMode}
@@ -635,18 +634,18 @@ function App() {
           />
         )}
         {viewMode === 'admin' && userRole === 'admin' && (
-          <AdminPanel 
+          <AdminPanel
             onBackToLibrary={() => {
               setViewMode('library')
               // Admin panel localStorage verilerini temizle
               localStorage.removeItem('admin_showAddForm')
               localStorage.removeItem('admin_formData')
               localStorage.removeItem('admin_editingBook')
-            }} 
+            }}
           />
         )}
         {viewMode === 'profile' && user && (
-          <Profile 
+          <Profile
             user={user}
             onBackToLibrary={() => setViewMode('library')}
           />

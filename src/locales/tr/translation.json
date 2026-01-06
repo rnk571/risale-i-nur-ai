@@ -97,6 +97,7 @@
     "bookmark": "Yer İşareti",
     "toc": "İçindekiler",
     "highlight": "Vurgula",
+    "highlights": "Vurgulamalar",
     "copy": "Kopyala",
     "search": "Ara",
     "speak": "Seslendir",
@@ -148,7 +149,11 @@
     "colorPink": "Pembe",
     "colorPurple": "Mor",
     "colorOrange": "Turuncu",
-    "colorCyan": "Cyan"
+    "colorCyan": "Cyan",
+    "scrollMode": "Okuma Modu",
+    "modePaginated": "Sayfalama",
+    "modeScroll": "Kaydırma",
+    "scrollModeHint": "Kaydırma modu, sayfa geçişleri yerine dikey kaydırma kullanır. Android'de metin seçimi sorunlarını giderebilir."
   },
   "highlight": "Vurgula",
   "copy": "Kopyala",
@@ -297,5 +302,3 @@
     }
   }
 }
-
-

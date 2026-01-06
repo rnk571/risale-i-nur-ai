@@ -97,6 +97,7 @@
     "bookmark": "Bookmark",
     "toc": "Table of Contents",
     "highlight": "Highlight",
+    "highlights": "Highlights",
     "copy": "Copy",
     "search": "Search",
     "speak": "Speak",
@@ -148,7 +149,11 @@
     "colorPink": "Pink",
     "colorPurple": "Purple",
     "colorOrange": "Orange",
-    "colorCyan": "Cyan"
+    "colorCyan": "Cyan",
+    "scrollMode": "Reading Mode",
+    "modePaginated": "Paginated",
+    "modeScroll": "Scroll",
+    "scrollModeHint": "Scroll mode uses vertical scrolling instead of page turns. May help with text selection issues on Android."
   },
   "profile": {
     "title": "My Profile",
@@ -293,5 +298,3 @@
     }
   }
 }
-
-

@@ -14,6 +14,11 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  @apply bg-white text-gray-900 transition-colors duration-300;
+}
+
+.dark body {
+  @apply bg-slate-900 text-gray-100;
 }
 
 /* iOS Safe Area Support - Sadece mobil cihazlarda */
@@ -35,7 +40,8 @@ body {
 
   /* iOS Navigation Bar Safe Area */
   .ios-nav-safe-area {
-    padding-top: calc(env(safe-area-inset-top) + 44px); /* Status bar + navigation bar */
+    padding-top: calc(env(safe-area-inset-top) + 44px);
+    /* Status bar + navigation bar */
   }
 
   /* iOS Bottom Safe Area */
@@ -54,6 +60,7 @@ body {
 
 /* Desktop'ta safe area sınıflarını devre dışı bırak */
 @media (min-width: 769px) {
+
   .ios-safe-area,
   .ios-nav-safe-area,
   .ios-bottom-safe-area,
@@ -88,6 +95,7 @@ body {
 .reader-viewport {
   height: 100dvh;
 }
+
 @supports not (height: 100dvh) {
   .reader-viewport {
     height: 100vh;
@@ -131,6 +139,7 @@ body {
   min-height: calc(100dvh - 90px) !important;
   max-height: calc(100dvh - 90px) !important;
 }
+
 @supports not (height: 100dvh) {
   .react-reader-container {
     height: calc(100vh - 90px) !important;
@@ -143,13 +152,16 @@ body {
   height: 100dvh !important;
   min-height: 100dvh !important;
   max-height: 100dvh !important;
-  padding-top: 0 !important; /* Fullscreen'de ekstra üst boşluk bırakma */
+  padding-top: 0 !important;
+  /* Fullscreen'de ekstra üst boşluk bırakma */
 }
+
 @supports not (height: 100dvh) {
   .react-reader-container.fullscreen {
     height: 100vh !important;
     min-height: 100vh !important;
     max-height: 100vh !important;
+    padding-top: 0 !important;
   }
 }
 
@@ -178,6 +190,7 @@ body {
 
 /* Mobil için özel yükseklik ayarlamaları */
 @media (max-width: 768px) {
+
   /* Mobilde, Reader container'ı parent'ın (flex-1) yüksekliğini tam doldursun.
      Header ve bottom nav yüksekliğini React tarafındaki layout yönetiyor. */
   .react-reader-container {
@@ -185,13 +198,15 @@ body {
     min-height: 100% !important;
     max-height: 100% !important;
   }
-  
+
   .react-reader-container.fullscreen {
     height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
     min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
     max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    padding-top: 40px !important; /* Üst kısımda boşluk bırak */
+    padding-top: 40px !important;
+    /* Üst kısımda boşluk bırak */
   }
+
   @supports not (height: 100dvh) {
     .react-reader-container.fullscreen {
       height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
@@ -388,12 +403,19 @@ body {
   background: #a8a8a8;
 }
 
+/* Fix for infinite scroll horizontal scrollbar issue */
+.react-reader-container.scroll-mode .epub-container {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .epub-container {
-    height: calc(100vh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); /* Account for mobile header and safe areas */
+    height: calc(100vh - 60px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    /* Account for mobile header and safe areas */
   }
-  
+
   /* Mobil dokunma optimizasyonu */
   .react-reader-container {
     -webkit-touch-callout: none;
@@ -403,13 +425,13 @@ body {
     -ms-user-select: none;
     user-select: none;
   }
-  
+
   /* Mobil navigasyon butonları */
   .mobile-nav-button {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
-  
+
   /* Mobil ilerleme çubuğu */
   .progress-bar-mobile {
     height: 3px !important;
@@ -422,7 +444,7 @@ body {
     min-height: 44px;
     min-width: 44px;
   }
-  
+
   .bookmark-item {
     min-height: 48px;
     padding: 12px !important;
@@ -442,6 +464,7 @@ body {
     opacity: 0;
     transform: translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -453,6 +476,7 @@ body {
     opacity: 0;
     transform: translateX(20px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -460,9 +484,12 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -472,6 +499,7 @@ body {
   0% {
     background-position: -200px 0;
   }
+
   100% {
     background-position: calc(200px + 100%) 0;
   }
@@ -491,7 +519,7 @@ body {
 }
 
 .animate-shimmer {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
   background-size: 200px 100%;
   animation: shimmer 1.5s infinite;
 }
@@ -511,19 +539,24 @@ html {
 .dark .pdf-menu svg {
   color: #e5e7eb !important;
 }
+
 .dark .pdf-menu svg [stroke] {
   stroke: #e5e7eb !important;
   stroke-width: 1.75;
 }
+
 .dark .pdf-menu svg [fill="none"] {
   fill: none !important;
 }
 
-.dark .pdf-menu button, .dark .pdf-menu span, .dark .pdf-menu div {
+.dark .pdf-menu button,
+.dark .pdf-menu span,
+.dark .pdf-menu div {
   color: #e5e7eb !important;
 }
 
-.dark .pdf-menu .rpv-core__icon, .dark .pdf-menu .rpv-toolbar__label {
+.dark .pdf-menu .rpv-core__icon,
+.dark .pdf-menu .rpv-toolbar__label {
   color: #e5e7eb !important;
 }
 
@@ -585,7 +618,7 @@ html {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
   transition: left 0.5s;
 }
 

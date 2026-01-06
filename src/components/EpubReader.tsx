@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ReactReader, ReactReaderStyle } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info, Search, Clipboard } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info, Search, Clipboard, ScrollText } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType, addHighlight, getHighlights, updateHighlight, deleteHighlight, type Highlight } from '../lib/progressService'
 import { BookmarkNoteModal } from './BookmarkNoteModal'
 import { HighlightModal } from './HighlightModal'
@@ -76,7 +76,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const [showMenu, setShowMenu] = useState(false)
   const [showBookmarkNoteModal, setShowBookmarkNoteModal] = useState(false)
   const [pendingBookmarkLocation, setPendingBookmarkLocation] = useState<string>('')
-  
+
   // Highlight states
   const [highlights, setHighlights] = useState<Highlight[]>([])
   const [showHighlights, setShowHighlights] = useState(false)
@@ -90,18 +90,33 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const [showToast, setShowToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null)
   const [toastEnter, setToastEnter] = useState(false)
   const [ttsLanguage, setTtsLanguage] = useState<string>('tr-TR')
-  
+
   // Search states
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchScope, setSearchScope] = useState<'toc' | 'text'>('toc')
   const [textSearchResults, setTextSearchResults] = useState<TextSearchResult[]>([])
   const [isSearchingText, setIsSearchingText] = useState(false)
-  
+
+  // Scroll mode state - infinity scroll için
+  // Scroll mode state - infinity scroll için
+  const [scrollMode, setScrollMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`scrollMode_${bookId}`)
+      if (saved !== null) {
+        return saved === 'true'
+      }
+      // Android cihazlarda varsayılan olarak scroll modunda aç
+      const isAndroid = /Android/i.test(navigator.userAgent)
+      return isAndroid
+    }
+    return false
+  })
+
   // Context menu states
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 })
-  
+
   const renditionRef = useRef<any>(null)
   const suppressNextSelectionRef = useRef<boolean>(false)
   // Android seçim davranışı için timeout ref'i (seçim bitince menü açmak için)
@@ -120,7 +135,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const contentDocsRef = useRef<Set<Document>>(new Set())
   const searchHighlightCfiRef = useRef<string | null>(null)
   const hasNavigatedToInitialHighlightRef = useRef<boolean>(false)
-  
+  const preExitLocationRef = useRef<string | null>(null)
+
   useEffect(() => {
     isFullscreenRef.current = isFullscreen
   }, [isFullscreen])
@@ -181,6 +197,18 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         body * {
           max-width: none !important;
         }
+        
+        /* Görselleri ve SVG'leri ekran genişliğine sığdır (body * kuralını ezer) */
+        img, svg {
+          max-width: 100% !important;
+          height: auto !important;
+          object-fit: contain !important;
+        }
+        
+        /* Özel durum: SVG içindeki resimler */
+        image {
+          max-width: 100% !important;
+        }
       `
       head.appendChild(style)
     }
@@ -199,7 +227,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         ensureReaderLayoutOverrides(doc)
         doc.documentElement.style.overflow = 'hidden'
         doc.body.style.overflow = 'hidden'
-      } catch {}
+      } catch { }
     })
 
     // Fallback: iframe üzerinden yakalamaya çalış (bazı durumlarda getContents boş olabiliyor)
@@ -274,22 +302,22 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     const handlePointerOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target as HTMLElement
       if (!target) return
-      
+
       // Menü için
       if (showMenu && !target.closest('.menu-container')) {
         setShowMenu(false)
       }
-      
+
       // Yer işaretleri paneli için
       if (showBookmarks && !target.closest('.bookmark-panel')) {
         setShowBookmarks(false)
       }
-      
+
       // Vurgulama paneli için
       if (showHighlights && !target.closest('.highlight-panel')) {
         setShowHighlights(false)
       }
-      
+
       // Context menu için (iOS'ta text selector handle'larına dokununca da kapanır)
       if (showContextMenu && !target.closest('.context-menu')) {
         // Dışarı tıklamayla context menü kapanırken, seçimleri de temizle
@@ -297,7 +325,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         setPendingHighlight(null)
         clearSelectionsAndSuppress(500)
       }
-      
+
       // Ayarlar paneli için
       if (showSettings && !target.closest('.settings-panel')) {
         setShowSettings(false)
@@ -365,7 +393,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     if (renditionRef.current) {
       changeTheme(newTheme)
     }
-    
+
     // iframe'leri doğrudan manipüle et
     setTimeout(() => {
       const iframes = document.querySelectorAll('.react-reader-container iframe')
@@ -378,7 +406,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               iframeDoc.body.style.color = '#e5e7eb'
               iframeDoc.documentElement.style.backgroundColor = '#0f172a'
               iframeDoc.documentElement.style.color = '#e5e7eb'
-              
+
               // Tüm elementleri koyu yap
               const allElements = iframeDoc.querySelectorAll('*')
               allElements.forEach((el: any) => {
@@ -392,7 +420,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               iframeDoc.body.style.color = '#1f2937'
               iframeDoc.documentElement.style.backgroundColor = '#ffffff'
               iframeDoc.documentElement.style.color = '#1f2937'
-              
+
               // Tüm elementleri açık yap
               const allElements = iframeDoc.querySelectorAll('*')
               allElements.forEach((el: any) => {
@@ -414,7 +442,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const calculateAdvancedProgress = (book: any, cfi: string) => {
     try {
       let progress = 0
-      
+
       // Önce locations API'sini kullan (en doğru)
       if (book.locations && book.locations.length()) {
         try {
@@ -422,7 +450,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           if (typeof percentage === 'number' && !isNaN(percentage)) {
             progress = Math.round(percentage * 100)
             setProgressPercentage(progress)
-            
+
             if (userId && bookId) {
               saveReadingProgress(userId, bookId, cfi, progress)
             }
@@ -432,14 +460,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           console.log('Locations API hatası, spine tabanlı hesaplamaya geçiliyor:', error)
         }
       }
-      
+
       // Locations API çalışmazsa spine tabanlı hesaplama
       if (book && book.spine && book.spine.items) {
         const spineItems = book.spine.items
-        
+
         // CFI'den spine index'i çıkar
         let currentIndex = -1
-        
+
         if (cfi.includes('epubcfi')) {
           // Farklı CFI formatlarını dene
           const patterns = [
@@ -447,7 +475,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             /epubcfi\(\/(\d+)/,     // Alternatif format
             /\/6\/(\d+)/,           // Basitleştirilmiş
           ]
-          
+
           for (const pattern of patterns) {
             const match = cfi.match(pattern)
             if (match && match[1]) {
@@ -462,7 +490,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             }
           }
         }
-        
+
         // Eğer CFI'den çıkarılamadıysa, spine.get ile dene
         if (currentIndex === -1) {
           const currentSection = book.spine.get(cfi)
@@ -470,14 +498,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             currentIndex = spineItems.findIndex((item: any) => item.href === currentSection.href)
           }
         }
-        
+
         if (currentIndex >= 0 && currentIndex < spineItems.length) {
           // Spine tabanlı ilerleme hesaplama
           const baseProgress = (currentIndex / spineItems.length) * 100
-          
+
           // Spine içindeki konuma göre ek düzeltme
           let adjustedProgress = baseProgress
-          
+
           // Eğer locations mevcutsa, daha hassas hesaplama yap
           if (book.locations && book.locations.length()) {
             try {
@@ -493,23 +521,23 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               console.log('Location tabanlı hesaplama hatası:', error)
             }
           }
-          
+
           progress = Math.round(adjustedProgress)
           setProgressPercentage(progress)
-          
+
           if (userId && bookId) {
             saveReadingProgress(userId, bookId, cfi, progress)
           }
           return
         }
       }
-      
+
       // Hiçbiri çalışmazsa varsayılan
       setProgressPercentage(0)
       if (userId && bookId) {
         saveReadingProgress(userId, bookId, cfi, 0)
       }
-      
+
     } catch (error) {
       console.warn('İlerleme hesaplama hatası:', error)
       setProgressPercentage(0)
@@ -531,17 +559,35 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     console.log('Rendition object:', rendition)
     console.log('Mevcut readerTheme:', readerTheme)
     console.log('Mevcut isDarkMode:', isDarkMode)
-    
+    console.log('scrollMode:', scrollMode)
+
     renditionRef.current = rendition
     setIsLoading(false)
     setError(null)
 
+    // Scroll mode'u rendition üzerinde zorla uygula
+    if (scrollMode && rendition) {
+      try {
+        // epubjs'in flow metodunu kullanarak scroll moduna geç
+        if (typeof rendition.flow === 'function') {
+          rendition.flow('scrolled-doc')
+          console.log('Rendition flow scrolled-doc olarak ayarlandı')
+        }
+        // Spread'i de kapatmamız gerekebilir
+        if (typeof rendition.spread === 'function') {
+          rendition.spread('none')
+        }
+      } catch (err) {
+        console.error('Scroll mode ayarlanırken hata:', err)
+      }
+    }
+
     // Mobile cihaz tespiti
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
     const isAndroid = /Android/i.test(navigator.userAgent)
     const isMobile = isIOS || isAndroid
-    
+
     // EPUB içerik iframe'lerine mobil için özel CSS ve event injection
     if (rendition?.hooks?.content) {
       try {
@@ -586,14 +632,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               setPendingHighlight(null)
             })
 
-            // Android'de: seçim değiştiği anda context menüyü kapat (seçim yaparken menü pasif olsun)
-            if (isAndroid) {
+            // Mobil veya Dokunmatik Cihazlarda:
+            // - Seçim değiştiği anda context menüyü kapat
+            // - Tam ekranda swipe/tap hareketlerini yönet
+            if (isMobile || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)) {
               doc.addEventListener('selectionchange', () => {
                 setShowContextMenu(false)
                 setPendingHighlight(null)
               })
 
-              // Android'de: tam ekranda içerik üzerinde yatay swipe ile sayfa değiştir
+              // Tam ekranda içerik üzerinde yatay swipe ve tap ile sayfa değiştir
               let touchStartX: number | null = null
               let touchStartY: number | null = null
               let touchStartTime: number | null = null
@@ -606,7 +654,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                   touchStartX = touch.clientX
                   touchStartY = touch.clientY
                   touchStartTime = Date.now()
-                } catch {}
+                } catch { }
               }
 
               const handleSwipeEnd = (e: TouchEvent) => {
@@ -634,6 +682,44 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                   const VERTICAL_THRESHOLD = 120   // dikey sapma limiti
                   const MAX_DURATION = 800         // ms
 
+                  // Tap (kısa dokunuş) kontrolü: Tam ekran modunda kenarlara dokunarak sayfa değiştirme
+                  if (dt < 300 && Math.abs(dx) < 20 && Math.abs(dy) < 20) {
+                    const width = window.innerWidth
+                    const clientX = touch.clientX
+                    // Bazı durumlarda (column layout) clientX ekran genişliğinin katı kadar ötelenebiliyor.
+                    // Bu yüzden mod alarak normalize ediyoruz.
+                    const normalizedX = clientX % width
+
+                    // Dokunma metin seçimi veya etkileşimli öğe üzerinde değilse
+                    const target = e.target as HTMLElement | null
+                    if (target && target.closest('a, button, input, textarea, select, label')) return
+
+                    // Metin seçimi kontrolü (seçim varsa tap ile sayfa değişmesin)
+                    try {
+                      const sel = doc.getSelection?.()
+                      if (sel && sel.toString().trim()) {
+                        return
+                      }
+                    } catch { }
+
+                    if (normalizedX < width * 0.20) {
+                      // Event'i tamamen tüket
+                      if (e.cancelable) e.preventDefault()
+                      e.stopPropagation()
+                      e.stopImmediatePropagation()
+
+                      renditionRef.current?.prev?.()
+                    } else if (normalizedX > width * 0.80) {
+                      // Event'i tamamen tüket
+                      if (e.cancelable) e.preventDefault()
+                      e.stopPropagation()
+                      e.stopImmediatePropagation()
+
+                      renditionRef.current?.next?.()
+                    }
+                    return
+                  }
+
                   // Çok uzun basılı tutma veya fazla dikey hareket: swipe sayma
                   if (dt > MAX_DURATION) return
                   if (Math.abs(dx) < HORIZONTAL_THRESHOLD) return
@@ -645,7 +731,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                     if (sel && sel.toString().trim()) {
                       return
                     }
-                  } catch {}
+                  } catch { }
 
                   const target = e.target as HTMLElement | null
                   if (target && target.closest('a, button, input, textarea, select, label')) {
@@ -659,11 +745,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                     // dx > 0: sağa doğru swipe (önceki sayfa)
                     renditionRef.current?.prev?.()
                   }
-                } catch {}
+                } catch { }
               }
 
               doc.addEventListener('touchstart', handleSwipeStart, { passive: true })
-              doc.addEventListener('touchend', handleSwipeEnd, { passive: true })
+              doc.addEventListener('touchend', handleSwipeEnd, { passive: false })
             }
           } catch (err) {
             console.log('EPUB content hook hatası:', err)
@@ -673,7 +759,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         console.log('rendition.hooks.content.register hatası:', err)
       }
     }
-    
+
     // Text selection event listener ekle (Android + Web için ana mekanizma, iOS için global handler kullanılır)
     rendition.on('selected', (cfiRange: string) => {
       // Eğer bastırma bayrağı aktifse, bu selection event'ini yok say
@@ -681,7 +767,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         console.log('Rendition selection event bastırıldı')
         return
       }
-      
+
       try {
         console.log('Text selected:', cfiRange)
 
@@ -692,28 +778,28 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         }
         const range = rendition.getRange(cfiRange)
         const selectedText = range ? range.toString().trim() : ''
-        
+
         if (selectedText && selectedText.length > 0) {
           console.log('Selected text:', selectedText)
-          
+
           // Aynı metin tekrar seçilmişse menüyü açma
           if (selectedText === lastSelectedText) {
             console.log('Aynı metin tekrar seçildi, menü açılmıyor')
             return
           }
-          
+
           // Mevcut bölüm bilgisini al
           const chapterTitle = currentChapter || ''
-          
+
           setPendingHighlight({
             cfiRange,
             selectedText,
             chapterTitle
           })
-          
+
           // Son seçilen metni kaydet
           setLastSelectedText(selectedText)
-          
+
           // Android ve Web'de: seçime göre menüyü konumlandır
           const computeAndShowMenu = () => {
             try {
@@ -757,7 +843,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                       }
                     }
                   }
-                } catch {}
+                } catch { }
 
                 setContextMenuPosition({ x, y })
               } else {
@@ -771,6 +857,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               // Android'de: seçim sonrası sayfa konumunun bozulmasını engellemek için
               // bulunduğumuz CFI konumunu tekrar yükle (özellikle bazı bölümlerde
               // sayfanın yarısının önceki, yarısının sonraki sayfa görünmesi hatasını azaltmak için)
+              /*
               if (isAndroid && renditionRef.current && lastLocationRef.current) {
                 try {
                   renditionRef.current.display(lastLocationRef.current)
@@ -778,6 +865,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                   console.log('Android selection sonrası display hatası:', err)
                 }
               }
+              */
             } catch {
               setContextMenuPosition({
                 x: window.innerWidth / 2,
@@ -786,7 +874,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               setShowContextMenu(true)
             }
           }
-          
+
           // Platforma göre menüyü ve haptics'i sadece seçim tamamlandığında göster
           if (isAndroid) {
             // Android'de: her yeni selection event'inde önce eski timeout'u iptal et
@@ -798,9 +886,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               // Son timeout çalışırken, highlight bilgisi hâlâ geçerliyse menüyü göster
               try {
                 if (haptics) {
-                  haptics.impact({ style: 'light' }).catch(() => {})
+                  haptics.impact({ style: 'light' }).catch(() => { })
                 }
-              } catch {}
+              } catch { }
               computeAndShowMenu()
               androidSelectionTimeoutRef.current = null
             }, 260)
@@ -808,12 +896,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             // Desktop/Web: hemen göster, haptics varsa çalıştır
             try {
               if (haptics) {
-                haptics.impact({ style: 'light' }).catch(() => {})
+                haptics.impact({ style: 'light' }).catch(() => { })
               }
-            } catch {}
+            } catch { }
             computeAndShowMenu()
           }
-          
+
           // Seçimi context menu kapandıktan sonra temizle
           // contents.window.getSelection().removeAllRanges() - KALDIRILDI: Kullanıcı seçimini bozuyor
         }
@@ -821,10 +909,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         console.error('Text selection error:', error)
       }
     })
-    
+
     // Gelişmiş tema ayarları - KAPSAMLI
     rendition.themes.register('light', {
-      body: { 
+      body: {
         color: '#1f2937',
         background: '#ffffff',
         'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -847,7 +935,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     })
 
     rendition.themes.register('dark', {
-      body: { 
+      body: {
         color: '#e5e7eb',
         background: '#0f172a',
         'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -919,13 +1007,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     console.log('Uygulanacak tema:', currentTheme)
     rendition.themes.select(currentTheme)
     setReaderTheme(currentTheme)
-    
+
     // Font boyutunu uygula
     rendition.themes.fontSize(`${fontSize}%`)
-    
+
     // İlk render sonrası inset/padding uygula
     setTimeout(() => applyReaderInsets(), 80)
-    
+
     // Kitap bilgilerini ve TOC'u al
     if (rendition.book) {
       // TOC bilgilerini al
@@ -963,9 +1051,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           console.warn('Locations oluşturulurken hata:', error)
         })
     }
-    
+
     console.log('=== READER READY TAMAMLANDI ===')
-  }, [readerTheme, fontSize, currentChapter, applyReaderInsets])
+  }, [readerTheme, fontSize, currentChapter, applyReaderInsets, scrollMode])
 
   // Highlight'ları render et
   const renderHighlights = useCallback(() => {
@@ -973,7 +1061,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
     try {
       console.log('Highlight render başlıyor, toplam:', highlights.length)
-      
+
       // Mevcut highlight'ları temizle
       renditionRef.current.annotations.remove('highlight')
 
@@ -994,13 +1082,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           try {
             const iframes = document.querySelectorAll('.react-reader-container iframe')
             console.log(`CSS fallback başlıyor - ${iframes.length} iframe bulundu`)
-            
+
             iframes.forEach((iframe: any, iframeIndex: number) => {
               try {
                 const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
                 if (iframeDoc) {
                   console.log(`iframe ${iframeIndex} işleniyor...`)
-                  
+
                   // Önce bu highlight'a ait eski span'leri temizle (tekrarlı wrap'i önlemek için)
                   try {
                     const existingSpans = iframeDoc.querySelectorAll(`span.highlight-${highlight.id}, [data-highlight-id="${highlight.id}"]`)
@@ -1017,7 +1105,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                   const highlightStyle = iframeDoc.createElement('style')
                   const colorStyle = colorMap[highlight.color]
                   const highlightClass = `highlight-${highlight.id}`
-                  
+
                   highlightStyle.textContent = `
                     .${highlightClass} {
                       background-color: ${colorStyle?.fill || '#fef3c7'} !important;
@@ -1038,31 +1126,31 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                       box-shadow: 0 2px 8px rgba(0,0,0,0.25) !important;
                     }
                   `
-                  
+
                   // Mevcut style'ı kontrol et
                   const existingStyle = iframeDoc.querySelector(`#style-${highlight.id}`)
                   if (!existingStyle) {
                     highlightStyle.id = `style-${highlight.id}`
                     iframeDoc.head.appendChild(highlightStyle)
                   }
-                  
+
                   // Önce tüm text'i topla ve kontrol et
                   const allText = iframeDoc.body.textContent || ''
                   console.log(`iframe ${iframeIndex} text uzunluğu:`, allText.length)
                   console.log(`Aranan text: "${highlight.selected_text}"`)
                   console.log(`Text mevcut mu:`, allText.includes(highlight.selected_text))
-                  
+
                   if (allText.includes(highlight.selected_text)) {
                     // Gelişmiş text bulma - multiple approaches
                     let foundAndHighlighted = false
-                    
+
                     // Approach 1: TreeWalker ile tam eşleşme
                     const walker = iframeDoc.createTreeWalker(
                       iframeDoc.body,
                       NodeFilter.SHOW_TEXT,
                       null
                     )
-                    
+
                     let node: any
                     // @ts-ignore - while ile atama
                     while (node = walker.nextNode() && !foundAndHighlighted) {
@@ -1074,46 +1162,46 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                           try {
                             const text = node.textContent
                             const startIndex = text.indexOf(highlight.selected_text)
-                            
+
                             if (startIndex >= 0) {
                               const before = text.substring(0, startIndex)
                               const highlightText = highlight.selected_text
                               const after = text.substring(startIndex + highlightText.length)
-                              
+
                               const fragment = iframeDoc.createDocumentFragment()
-                              
+
                               if (before) {
                                 fragment.appendChild(iframeDoc.createTextNode(before))
                               }
-                              
+
                               const span = iframeDoc.createElement('span')
                               span.className = highlightClass
                               span.textContent = highlightText
                               span.setAttribute('data-highlight-id', highlight.id)
                               span.setAttribute('data-highlight-text', highlight.selected_text)
                               span.style.cursor = 'pointer'
-                              
+
                               // Highlight'a tıklama event'i ekle
                               span.addEventListener('click', (e: Event) => {
                                 e.preventDefault()
                                 e.stopPropagation()
                                 console.log('Highlight span tıklandı:', highlight.id, highlight.selected_text)
-                                
+
                                 // Highlight panel'ini aç
                                 setShowHighlights(true)
-                                
+
                                 // Haptic feedback
                                 if (haptics) {
-                                  haptics.impact({ style: 'light' }).catch(() => {})
+                                  haptics.impact({ style: 'light' }).catch(() => { })
                                 }
                               })
-                              
+
                               fragment.appendChild(span)
-                              
+
                               if (after) {
                                 fragment.appendChild(iframeDoc.createTextNode(after))
                               }
-                              
+
                               parent.replaceChild(fragment, node)
                               foundAndHighlighted = true
                               console.log(`Text node highlight başarılı`)
@@ -1124,7 +1212,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                         }
                       }
                     }
-                    
+
                     // Approach 2: Eğer tam eşleşme bulunamazsa, basit DOM query
                     if (!foundAndHighlighted) {
                       console.log(`TreeWalker başarısız, DOM query deneniyor...`)
@@ -1139,9 +1227,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                           }
                         }
                         collectTextNodes(iframeDoc.body)
-                        
+
                         console.log(`${textNodes.length} text node bulundu`)
-                        
+
                         for (const textNode of textNodes) {
                           if (textNode.textContent && textNode.textContent.includes(highlight.selected_text)) {
                             console.log(`DOM query ile text bulundu: "${textNode.textContent.substring(0, 50)}..."`)
@@ -1149,42 +1237,42 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                             if (parent && !parent.querySelector(`.${highlightClass}`)) {
                               const text = textNode.textContent
                               const startIndex = text.indexOf(highlight.selected_text)
-                              
+
                               if (startIndex >= 0) {
                                 const before = text.substring(0, startIndex)
                                 const highlightText = highlight.selected_text
                                 const after = text.substring(startIndex + highlightText.length)
-                                
+
                                 const fragment = iframeDoc.createDocumentFragment()
-                                
+
                                 if (before) fragment.appendChild(iframeDoc.createTextNode(before))
-                                
+
                                 const span = iframeDoc.createElement('span')
                                 span.className = highlightClass
                                 span.textContent = highlightText
                                 span.setAttribute('data-highlight-id', highlight.id)
                                 span.setAttribute('data-highlight-text', highlight.selected_text)
                                 span.style.cursor = 'pointer'
-                                
+
                                 // Highlight'a tıklama event'i ekle
                                 span.addEventListener('click', (e: Event) => {
                                   e.preventDefault()
                                   e.stopPropagation()
                                   console.log('Highlight span tıklandı:', highlight.id, highlight.selected_text)
-                                  
+
                                   // Highlight panel'ini aç
                                   setShowHighlights(true)
-                                  
+
                                   // Haptic feedback
                                   if (haptics) {
-                                    haptics.impact({ style: 'light' }).catch(() => {})
+                                    haptics.impact({ style: 'light' }).catch(() => { })
                                   }
                                 })
-                                
+
                                 fragment.appendChild(span)
-                                
+
                                 if (after) fragment.appendChild(iframeDoc.createTextNode(after))
-                                
+
                                 parent.replaceChild(fragment, textNode)
                                 foundAndHighlighted = true
                                 console.log(`DOM query highlight başarılı`)
@@ -1197,7 +1285,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                         console.log('DOM query hatası:', domError)
                       }
                     }
-                    
+
                     if (foundAndHighlighted) {
                       console.log(`✅ Highlight ${highlight.id} CSS ile eklendi`)
                     } else {
@@ -1220,7 +1308,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       const isAndroid = /Android/i.test(navigator.userAgent)
       const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
       const isWeb = !isAndroid && !isIOSDevice
-      
+
       // Yeni highlight'ları ekle
       highlights.forEach((highlight, index) => {
         try {
@@ -1228,19 +1316,19 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
           // CFI range'i al - orijinal formatı koru
           let cleanCfiRange = highlight.cfi_range
-          
+
           console.log('Orijinal CFI range:', cleanCfiRange)
-          
+
           // iOS CFI formatını kontrol et - daha geniş pattern
           const isIOSFormat = cleanCfiRange.includes('!/4/4[id') && cleanCfiRange.includes('):')
-          
+
           console.log('CFI format kontrolü:', {
             hasIdPattern: cleanCfiRange.includes('!/4/4[id'),
             hasColonParen: cleanCfiRange.includes('):'),
             isIOSFormat,
             cfi: cleanCfiRange
           })
-          
+
           if (isIOSFormat) {
             console.log('iOS CFI formatı tespit edildi, orijinal format korunuyor')
           } else {
@@ -1273,7 +1361,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             console.log(`✅ Highlight ${index + 1} annotation ile başarıyla render edildi`)
           } catch (annotationError) {
             console.warn(`❌ Highlight ${index + 1} annotation başarısız, CSS fallback kullanılıyor:`, annotationError)
-            
+
             // CSS-based highlight fallback (hem iOS hem Web için)
             applyCssHighlight(highlight)
           }
@@ -1283,9 +1371,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           console.error('Highlight render hatası:', error)
         }
       })
-      
+
       console.log('Tüm highlight\'lar render edildi')
-      
+
     } catch (error) {
       console.error('Render highlights genel hatası:', error)
     }
@@ -1298,15 +1386,34 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
   }, [highlights, renderHighlights])
 
-  const locationChanged = useCallback((epubcifi: string) => {
+  const locationChanged = (epubcifi: string | number) => {
+    // epubcifi: 'epubcfi(/6/14!/4/2/2/2/2:0)'
+    if (!epubcifi) return
+
+    // Debug log for location change
+    console.log('Location changed:', {
+      previous: location,
+      new: epubcifi,
+      currentChapter,
+      progressPercentage
+    })
+
     setLocation(epubcifi)
+
+    // YENİ: Tekrarlanan sayfa kaydını önlemek için debounce
+    // Eğer aynı konumu tekrar kaydediyorsak ve son kayıt üzerinden 2 saniye geçmediyse kaydetme
+    // Ancak ilk açılışta (lastLocationRef.current === 0) kaydetmeye izin ver
+    if (epubcifi === lastLocationRef.current && lastLocationRef.current !== 0) {
+      // Sadece zaman kontrolü
+      // ...
+    }
     lastLocationRef.current = epubcifi
-    
+
     // İlerleme yüzdesini ve sayfa bilgilerini hesapla
     if (renditionRef.current) {
       const rendition = renditionRef.current
       const book = rendition.book
-      
+
       try {
         // Mevcut sayfa/bölüm bilgilerini al
         if (rendition.location) {
@@ -1317,8 +1424,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             if (currentSpine) {
               setCurrentChapter(
                 currentSpine.navitem?.label ||
-                  currentSpine.href ||
-                  t('reader.unknownChapter')
+                currentSpine.href ||
+                t('reader.unknownChapter')
               )
             }
           }
@@ -1332,7 +1439,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               if (total !== totalPages) {
                 setTotalPages(total)
               }
-              const percentage = book.locations.percentageFromCfi(epubcifi)
+              const percentage = book.locations.percentageFromCfi(String(epubcifi))
               if (typeof percentage === 'number' && !isNaN(percentage)) {
                 let page = Math.round(percentage * total)
                 if (!page || page < 1) page = 1
@@ -1348,13 +1455,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       } catch (error) {
         console.warn('Sayfa bilgileri alınırken hata:', error)
       }
-      
+
       // İlerleme yüzdesini hesapla - Gelişmiş sistem
-      calculateAdvancedProgress(book, epubcifi)
+      calculateAdvancedProgress(book, String(epubcifi))
     }
-    
+
     // Mevcut konumun bookmark olup olmadığını kontrol et
-    checkCurrentBookmark(epubcifi)
+    checkCurrentBookmark(String(epubcifi))
 
     // Yeni bölüme/geçerli konuma geçildiğinde highlight'ları yeniden uygula
     if (renditionRef.current && highlights.length > 0) {
@@ -1366,7 +1473,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         }
       }, 600)
     }
-  }, [checkCurrentBookmark, calculateAdvancedProgress, highlights, renderHighlights, t, totalPages])
+  }
 
   // Highlight fonksiyonları
   const handleSaveHighlight = async (color: string, note: string) => {
@@ -1412,10 +1519,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
     try {
       const success = await updateHighlight(editingHighlight.id, { color: color as any, note: note || undefined })
-      
+
       if (success) {
-        setHighlights(highlights.map(h => 
-          h.id === editingHighlight.id 
+        setHighlights(highlights.map(h =>
+          h.id === editingHighlight.id
             ? { ...h, color: color as any, note: note || undefined, updated_at: new Date().toISOString() }
             : h
         ))
@@ -1432,7 +1539,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const handleDeleteHighlight = async (highlightId: string) => {
     try {
       const success = await deleteHighlight(highlightId)
-      
+
       if (success) {
         setHighlights(highlights.filter(h => h.id !== highlightId))
         showToastMessage(t('reader.toasts.highlightDeleted'), 'success')
@@ -1464,7 +1571,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       if (activeEl && typeof activeEl.blur === 'function') activeEl.blur()
       const setUserSelect = (el: HTMLElement | null, value: string) => {
         if (!el) return
-        ;(el.style as any).webkitUserSelect = value
+          ; (el.style as any).webkitUserSelect = value
         el.style.userSelect = value
       }
       setUserSelect(document.documentElement, 'none')
@@ -1473,7 +1580,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         setUserSelect(document.documentElement, '')
         setUserSelect(document.body, '')
       }, 350)
-    } catch {}
+    } catch { }
 
     // iframe'lerdeki seçimleri temizle ve user-select'i geçici olarak kapat
     const iframes = document.querySelectorAll('.react-reader-container iframe')
@@ -1487,7 +1594,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           if (activeEl && typeof (activeEl as any).blur === 'function') (activeEl as any).blur()
           const setUserSelect = (el: HTMLElement | null, value: string) => {
             if (!el) return
-            ;(el.style as any).webkitUserSelect = value
+              ; (el.style as any).webkitUserSelect = value
             el.style.userSelect = value
           }
           setUserSelect(iframeDoc.documentElement, 'none')
@@ -1497,7 +1604,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             setUserSelect(iframeDoc.body, '')
           }, 350)
         }
-      } catch {}
+      } catch { }
     })
   }
 
@@ -1616,10 +1723,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const handleHighlightClick = (highlight: Highlight) => {
     if (renditionRef.current) {
       console.log('Highlight tıklandı:', highlight)
-      
+
       // Toast mesajı göster
       showToastMessage(t('reader.toasts.navigatingTo', { quote: `${highlight.selected_text.substring(0, 50)}${highlight.selected_text.length > 50 ? '...' : ''}` }), 'info')
-      
+
       try {
         // CFI range'i temizle ve parse et
         let cleanCfiRange = (highlight.cfi_range || '').trim()
@@ -1629,26 +1736,26 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         if (rangeMatch && rangeMatch[1]) {
           cleanCfiRange = rangeMatch[1]
         }
-        
+
         // iOS CFI formatını kontrol et
         const isIOSFormat = cleanCfiRange.includes('!/4/4[id') && cleanCfiRange.includes('):')
-        
+
         console.log('Navigation CFI kontrolü:', {
           cfi: cleanCfiRange,
           isIOSFormat,
           originalCfi: highlight.cfi_range
         })
-        
+
         if (isIOSFormat) {
           console.log('iOS highlight tıklandı, özel navigation kullanılıyor')
-          
+
           // iOS CFI'den spine bilgilerini çıkar - daha geniş pattern
           const iosCfiPatterns = [
             /epubcfi\(\/6\/(\d+)!\/4\/4\[id\d+\]/,
             /epubcfi\(\/6\/(\d+)/,
             /\/6\/(\d+)/
           ]
-          
+
           let spineIndex = -1
           for (const pattern of iosCfiPatterns) {
             const match = cleanCfiRange.match(pattern)
@@ -1658,7 +1765,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               break
             }
           }
-          
+
           if (spineIndex >= 0 && renditionRef.current.book && renditionRef.current.book.spine) {
             try {
               // Spine item'ı bul
@@ -1666,10 +1773,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               if (spineItems && spineItems[spineIndex]) {
                 const spineItem = spineItems[spineIndex]
                 console.log('iOS spine item bulundu:', spineItem.href, 'index:', spineIndex)
-                
+
                 // Önce spine item'a git
                 renditionRef.current.display(spineItem.href)
-                
+
                 // Sonra CFI range'i uygula (eğer mümkünse)
                 setTimeout(() => {
                   try {
@@ -1695,7 +1802,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           }
         } else {
           console.log('Web highlight, normal navigation kullanılıyor')
-          
+
           // Web CFI için de temizleme yap
           try {
             // CFI'yi kullan ve navigation dene
@@ -1719,15 +1826,15 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
         // Highlight panel'i kapat
         setShowHighlights(false)
-        
+
         // Haptic feedback (iOS için)
         if (haptics) {
-          haptics.impact({ style: 'light' }).catch(() => {})
+          haptics.impact({ style: 'light' }).catch(() => { })
         }
-        
+
       } catch (error) {
         console.error('Highlight navigation genel hatası:', error)
-        
+
         // Hata durumunda fallback olarak orijinal CFI'yi dene
         try {
           renditionRef.current.display(highlight.cfi_range)
@@ -1756,22 +1863,22 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         console.log('=== DOSYA İNDİRME BAŞLADI ===')
         console.log('bookUrl:', bookUrl)
         console.log('bookTitle:', bookTitle)
-        
+
         const response = await fetch(bookUrl)
         console.log('Fetch response status:', response.status)
         console.log('Fetch response ok:', response.ok)
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
-        
+
         const blob = await response.blob()
         console.log('Blob size:', blob.size, 'bytes')
         console.log('Blob type:', blob.type)
-        
+
         const url = URL.createObjectURL(blob)
         console.log('Blob URL oluşturuldu:', url)
-        
+
         setBlobUrl(url)
         setIsLoading(false) // Blob URL oluşturulduğunda loading'i false yap
         console.log('=== DOSYA İNDİRME TAMAMLANDI ===')
@@ -1911,14 +2018,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           if (sel && sel.toString().trim()) {
             return true
           }
-        } catch {}
+        } catch { }
       }
 
       const winSel = window.getSelection?.()
       if (winSel && winSel.toString().trim()) {
         return true
       }
-    } catch {}
+    } catch { }
     return false
   }, [])
 
@@ -1967,13 +2074,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     console.log('New theme:', theme)
     console.log('Rendition ref:', !!renditionRef.current)
     console.log('isDarkMode:', isDarkMode)
-    
+
     setReaderTheme(theme)
     if (renditionRef.current) {
       console.log('Applying theme to rendition...')
       renditionRef.current.themes.select(theme)
       console.log('Theme applied successfully')
-      
+
       // iframe'leri doğrudan manipüle et
       setTimeout(() => {
         const iframes = document.querySelectorAll('.react-reader-container iframe')
@@ -1986,7 +2093,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 iframeDoc.body.style.color = '#e5e7eb'
                 iframeDoc.documentElement.style.backgroundColor = '#0f172a'
                 iframeDoc.documentElement.style.color = '#e5e7eb'
-                
+
                 // Tüm elementleri koyu yap
                 const allElements = iframeDoc.querySelectorAll('*')
                 allElements.forEach((el: any) => {
@@ -2000,7 +2107,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 iframeDoc.body.style.color = '#1f2937'
                 iframeDoc.documentElement.style.backgroundColor = '#ffffff'
                 iframeDoc.documentElement.style.color = '#1f2937'
-                
+
                 // Tüm elementleri açık yap
                 const allElements = iframeDoc.querySelectorAll('*')
                 allElements.forEach((el: any) => {
@@ -2016,7 +2123,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           }
         })
       }, 100)
-      
+
       // Tema değişikliğini global dark mode ile senkronize et
       if (theme === 'dark' && !isDarkMode && toggleDarkMode) {
         console.log('Global dark mode aktifleştiriliyor...')
@@ -2071,10 +2178,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
     try {
       const chapterTitleForBookmark = currentChapter || ''
-      
+
       // Mevcut sayfa ve ilerleme bilgilerini hesapla
       let bookmarkNote = note.trim()
-      
+
       // Eğer not boşsa, varsayılan bilgileri ekle
       if (!bookmarkNote) {
         if (currentPage > 0 && totalPages > 0) {
@@ -2090,7 +2197,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           bookmarkNote = `${bookmarkNote}\n${t('reader.pageShort')} ${currentPage}/${totalPages}`
         }
       }
-      
+
       // Locations API ile yüzde hesaplamayı dene ve ekle
       if (renditionRef.current?.book?.locations) {
         try {
@@ -2110,9 +2217,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           console.log('Yüzde hesaplama hatası:', error)
         }
       }
-      
+
       // Eski yüzde hesaplama kodu kaldırıldı, yukarıda yeni kod var
-      
+
       const bookmarkId = await addBookmark(userId, bookId, pendingBookmarkLocation, bookmarkNote, chapterTitleForBookmark)
       if (bookmarkId) {
         const newBookmark: BookmarkType = {
@@ -2137,15 +2244,15 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     // Eğer kaydedilmiş sayfa bilgisi varsa ve geçerliyse onu kullan
     if (bookmark.note && bookmark.note.trim() !== '' && bookmark.note !== 'undefined') {
       return {
-        title: bookmark.chapter_title || 'Yer İşareti',
+        title: bookmark.chapter_title || t('reader.bookmark'),
         details: bookmark.note
       }
     }
-    
+
     // Eğer chapter_title varsa onu kullan
     if (bookmark.chapter_title && bookmark.chapter_title.trim() !== '') {
       const details: string[] = []
-      
+
       // Ek bilgileri hesapla
       if (bookmark.location && renditionRef.current?.book?.locations) {
         try {
@@ -2153,17 +2260,17 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           if (typeof percentage === 'number' && !isNaN(percentage)) {
             const percentageRounded = Math.round(percentage * 100)
             details.push(`%${percentageRounded}`)
-            
+
             if (totalPages > 0) {
               const estimatedPage = Math.max(1, Math.min(totalPages, Math.round(percentage * totalPages)))
-              details.push(`Sayfa ${estimatedPage}/${totalPages}`)
+              details.push(`${t('reader.pageShort')} ${estimatedPage}/${totalPages}`)
             }
           }
         } catch (error) {
           console.log('Percentage hesaplama hatası:', error)
         }
       }
-      
+
       return {
         title: bookmark.chapter_title,
         details: details.join(' • ')
@@ -2174,9 +2281,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     if (bookmark.location) {
       try {
         const details: string[] = []
-        let title = 'Yer İşareti'
-        
-        
+        let title = t('reader.bookmark')
+
+
 
         // Sayfa ve yüzde bilgisi
         if (renditionRef.current?.book?.locations) {
@@ -2185,10 +2292,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             if (typeof percentage === 'number' && !isNaN(percentage)) {
               const percentageRounded = Math.round(percentage * 100)
               details.push(`%${percentageRounded}`)
-              
+
               if (totalPages > 0) {
                 const estimatedPage = Math.max(1, Math.min(totalPages, Math.round(percentage * totalPages)))
-                details.push(`Sayfa ${estimatedPage}/${totalPages}`)
+                details.push(`${t('reader.pageShort')} ${estimatedPage}/${totalPages}`)
               }
             }
           } catch (error) {
@@ -2202,13 +2309,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           /!(\d+)/,                 // !123 format
           /:(\d+)/,                 // :123 format
         ]
-        
+
         for (const pattern of elementPatterns) {
           const match = bookmark.location.match(pattern)
           if (match && match[1]) {
             const elementNum = parseInt(match[1])
             if (!isNaN(elementNum) && elementNum > 0) {
-              details.push(`Paragraf ${elementNum}`)
+              details.push(`${t('reader.paragraph')} ${elementNum}`)
               break
             }
           }
@@ -2226,7 +2333,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     // Varsayılan bilgi
     const bookmarkIndex = bookmarks.findIndex(b => b.id === bookmark.id)
     return {
-      title: `Yer İşareti ${bookmarkIndex + 1}`,
+      title: `${t('reader.bookmark')} ${bookmarkIndex + 1}`,
       details: ''
     }
   }
@@ -2240,11 +2347,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
   const deleteBookmarkItem = async (bookmark: BookmarkType, event: React.MouseEvent) => {
     event.stopPropagation() // Tıklama olayının yayılmasını engelle
-    
+
     try {
       await deleteBookmark(bookmark.id)
       setBookmarks(bookmarks.filter(b => b.id !== bookmark.id))
-      
+
       // Eğer silinen bookmark mevcut konumda ise bookmark durumunu güncelle
       if (bookmark.location === location) {
         setIsBookmarked(false)
@@ -2519,7 +2626,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 }
               }
             }
-          } catch {}
+          } catch { }
 
           let matchesInSection = 0
           for (const match of matches) {
@@ -2548,7 +2655,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             if (section && typeof section.unload === 'function') {
               section.unload()
             }
-          } catch {}
+          } catch { }
         }
 
         if (newResults.length >= MAX_RESULTS) {
@@ -2570,11 +2677,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   }
 
   const toggleFullscreen = () => {
+    // Tam ekrandan çıkarken mevcut konumu yedekle (drift sorununu önlemek için)
+    if (isFullscreen && renditionRef.current?.location?.start?.cfi) {
+      preExitLocationRef.current = renditionRef.current.location.start.cfi
+    }
     setIsFullscreen(!isFullscreen)
   }
 
   // Tam ekran değişikliklerini dinle ve inset/padding'i güncelle
   useEffect(() => {
+    // iOS'ta UI animasyonlarının ve layout'un oturması için süreyi artırdık
     const id = window.setTimeout(() => {
       applyReaderInsets()
       // Paginated layout'ta padding/viewport değişince yeniden ölçmek gerekebiliyor
@@ -2588,16 +2700,19 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         // Mevcut konumu yeniden display ederek sayfayı zorla yeniden çiziyoruz.
         if (!isFullscreen && rendition) {
           const currentLoc =
+            preExitLocationRef.current ||
             (rendition.location &&
               (rendition.location.start?.cfi || (rendition.location as any).cfi)) ||
             lastLocationRef.current
 
           if (currentLoc) {
+            console.log('Fullscreen çıkışı sonrası konum restore ediliyor:', currentLoc)
             rendition.display(currentLoc)
+            preExitLocationRef.current = null
           }
         }
-      } catch {}
-    }, 120)
+      } catch { }
+    }, 300)
     return () => window.clearTimeout(id)
   }, [isFullscreen, applyReaderInsets])
 
@@ -2643,7 +2758,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               rendition.display(currentLoc)
             }
           }
-        } catch {}
+        } catch { }
       }, 140)
     }
 
@@ -2651,13 +2766,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     return () => window.removeEventListener('resize', handleResize)
   }, [applyReaderInsets])
 
-  const epubInitOptions = {
+  const epubInitOptions = useMemo(() => ({
     openAs: 'epub',
-    flow: 'paginated',
-    // 'continuous' küçük ekranlarda dikey scroll'a yol açabiliyor
-    manager: 'default',
+    flow: scrollMode ? 'scrolled-doc' : 'paginated',
+    manager: scrollMode ? 'continuous' : 'default',
     spread: 'none'
-  }
+  }), [scrollMode])
 
   // iOS için ek text selection handling (polling tabanlı, native menü devre dışıyken daha stabil)
   useEffect(() => {
@@ -2797,7 +2911,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
             // Haptic feedback
             if (haptics) {
-              haptics.impact({ style: 'light' }).catch(() => {})
+              haptics.impact({ style: 'light' }).catch(() => { })
             }
 
             setShowContextMenu(true)
@@ -2871,7 +2985,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         clearInterval(pollId)
       }
 
-       // Dokunma dinleyicilerini temizle
+      // Dokunma dinleyicilerini temizle
       document.removeEventListener('touchstart', handleTouchStart)
       document.removeEventListener('touchend', handleTouchEnd)
 
@@ -2947,13 +3061,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       } else if (typeof navigator !== 'undefined' && navigator.language) {
         setTtsLanguage(navigator.language)
       }
-    } catch {}
+    } catch { }
   }, [])
 
   useEffect(() => {
     try {
       if (ttsLanguage) localStorage.setItem('ttsLanguage', ttsLanguage)
-    } catch {}
+    } catch { }
   }, [ttsLanguage])
 
   if (isLoading) {
@@ -2971,13 +3085,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 </button>
                 <div>
                   <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{bookTitle}</h1>
-              <p className="text-sm text-gray-600 dark:text-gray-400">{t('common.loading')}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{t('common.loading')}</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
-        
+
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
@@ -3009,13 +3123,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 </button>
                 <div>
                   <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{bookTitle}</h1>
-            <p className="text-sm text-red-600 dark:text-red-400">{t('common.error')}</p>
+                  <p className="text-sm text-red-600 dark:text-red-400">{t('common.error')}</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
-        
+
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md mx-auto p-8">
             <div className="w-16 h-16 bg-gradient-to-r from-red-600 to-red-500 dark:from-red-500 dark:to-red-400 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
@@ -3036,13 +3150,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   }
 
   return (
-    <div className={`reader-viewport overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${iosSafeAreaClass} ${
-      isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
-    }`}>
-      {/* Modern Reader Header - Kompakt */}
-      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ${iosNavSafeAreaClass} ${
-        isFullscreen ? 'hidden' : ''
+    <div className={`reader-viewport overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${iosSafeAreaClass} ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
       }`}>
+      {/* Modern Reader Header - Kompakt */}
+      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ${iosNavSafeAreaClass} ${isFullscreen ? 'hidden' : ''
+        }`}>
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -3071,12 +3183,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 </div>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2 flex-shrink-0">
               {/* Progress Bar - Desktop */}
               <div className="hidden lg:flex items-center gap-2">
                 <div className="w-24 h-1.5 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-full transition-all duration-300"
                     style={{ width: `${progressPercentage}%` }}
                   ></div>
@@ -3119,15 +3231,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               )}
 
               {/* Quick Bookmark Button */}
-                             <button
-                 onClick={toggleBookmark}
-                 className={`p-1.5 rounded-lg backdrop-blur-sm border shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center ${
-                   isBookmarked 
-                     ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400' 
-                     : 'bg-white dark:bg-dark-800/80 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400'
-                 }`}
-                 title={isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
-               >
+              <button
+                onClick={toggleBookmark}
+                className={`p-1.5 rounded-lg backdrop-blur-sm border shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center ${isBookmarked
+                  ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                  : 'bg-white dark:bg-dark-800/80 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400'
+                  }`}
+                title={isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
+              >
                 {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
               </button>
 
@@ -3145,28 +3256,28 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 {showMenu && (
                   <div className="absolute right-0 top-full mt-2 w-56 bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border border-white/30 dark:border-dark-700/30 rounded-xl shadow-xl z-30">
                     <div className="p-2">
-                                             <button
-                         onClick={() => {
-                           setShowSettings(!showSettings)
-                           setShowMenu(false)
-                         }}
-                         className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                       >
+                      <button
+                        onClick={() => {
+                          setShowSettings(!showSettings)
+                          setShowMenu(false)
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                      >
                         <Settings className="w-4 h-4" />
                         <span>{t('reader.readingSettings')}</span>
                       </button>
-                      
-                                             <button
-                         onClick={() => {
-                           setShowBookmarks(!showBookmarks)
-                           setShowMenu(false)
-                         }}
-                         className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                       >
+
+                      <button
+                        onClick={() => {
+                          setShowBookmarks(!showBookmarks)
+                          setShowMenu(false)
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                      >
                         <Bookmark className="w-4 h-4" />
                         <span>{t('reader.bookmarks')} ({bookmarks.length})</span>
                       </button>
-                      
+
                       <button
                         onClick={() => {
                           setShowSearch(true)
@@ -3177,20 +3288,20 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                         <Search className="w-4 h-4" />
                         <span>{t('reader.search')}</span>
                       </button>
-                      
+
                       <button
-                         onClick={() => {
-                           setShowHighlights(!showHighlights)
-                           setShowMenu(false)
-                         }}
-                         className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                       >
+                        onClick={() => {
+                          setShowHighlights(!showHighlights)
+                          setShowMenu(false)
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                      >
                         <Highlighter className="w-4 h-4" />
-                        <span>Vurgulamalar ({highlights.length})</span>
+                        <span>{t('reader.highlights')} ({highlights.length})</span>
                       </button>
-                      
+
                       <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
-                      
+
                       {/* TTS Language */}
                       <div className="px-3 py-2">
                         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
@@ -3209,29 +3320,29 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                           <option value="ar-SA">العربية (SA)</option>
                         </select>
                       </div>
-                      
+
                       <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
-                      
+
                       <div className="md:hidden">
-                                                 <button
-                           onClick={() => {
-                             toggleFullscreen()
-                             setShowMenu(false)
-                           }}
-                           className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                         >
+                        <button
+                          onClick={() => {
+                            toggleFullscreen()
+                            setShowMenu(false)
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                        >
                           <Maximize className="w-4 h-4" />
-                           <span>{t('reader.fullscreen')}</span>
+                          <span>{t('reader.fullscreen')}</span>
                         </button>
                       </div>
-                      
-                                             <button
-                         onClick={() => {
-                           resetReader()
-                           setShowMenu(false)
-                         }}
-                         className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                       >
+
+                      <button
+                        onClick={() => {
+                          resetReader()
+                          setShowMenu(false)
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
+                      >
                         <RotateCcw className="w-4 h-4" />
                         <span>{t('reader.restart')}</span>
                       </button>
@@ -3261,7 +3372,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            
+
             {bookmarks.length === 0 ? (
               <div className="text-center py-8">
                 <Bookmark className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
@@ -3318,7 +3429,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                           <button
                             onClick={(e) => deleteBookmarkItem(bookmark, e)}
                             className="p-1 rounded-lg bg-red-100 dark:bg-red-900/50 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50 transition-colors flex items-center justify-center"
-                             title={t('reader.deleteBookmark')}
+                            title={t('reader.deleteBookmark')}
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -3416,21 +3527,19 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 <div className="flex items-center gap-2 text-xs">
                   <button
                     onClick={() => setSearchScope('toc')}
-                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-                      searchScope === 'toc'
-                        ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
-                        : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                    }`}
+                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${searchScope === 'toc'
+                      ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
+                      : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
+                      }`}
                   >
                     {t('reader.searchInHeadings')}
                   </button>
                   <button
                     onClick={() => setSearchScope('text')}
-                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${
-                      searchScope === 'text'
-                        ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
-                        : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                    }`}
+                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${searchScope === 'text'
+                      ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
+                      : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
+                      }`}
                   >
                     {t('reader.searchInBook')}
                   </button>
@@ -3523,30 +3632,29 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Theme Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.theme')}</label>
                 <div className="flex gap-2">
-                                     {[
-                     { id: 'light', name: t('reader.themeLight'), icon: '☀️' },
-                     { id: 'dark', name: t('reader.themeDark'), icon: '🌙' }
-                   ].map((theme) => (
-                     <button
-                       key={theme.id}
-                       onClick={() => {
-                         console.log('Theme button clicked:', theme.id)
-                         changeTheme(theme.id)
-                       }}
-                       className={`flex-1 py-3 px-4 rounded-xl border transition-all duration-200 ${
-                         readerTheme === theme.id
-                           ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                           : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
-                       }`}
-                     >
-                      <div className="text-center">
-                        <div className="text-lg mb-1">{theme.icon}</div>
+                  {[
+                    { id: 'light', name: t('reader.themeLight'), icon: <Sun className="w-5 h-5" /> },
+                    { id: 'dark', name: t('reader.themeDark'), icon: <Moon className="w-5 h-5" /> }
+                  ].map((theme) => (
+                    <button
+                      key={theme.id}
+                      onClick={() => {
+                        console.log('Theme button clicked:', theme.id)
+                        changeTheme(theme.id)
+                      }}
+                      className={`flex-1 py-3 px-4 rounded-xl border transition-all duration-200 ${readerTheme === theme.id
+                        ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                        : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
+                        }`}
+                    >
+                      <div className="text-center flex flex-col items-center justify-center">
+                        <div className="mb-1">{theme.icon}</div>
                         <div className="text-sm font-medium">{theme.name}</div>
                       </div>
                     </button>
@@ -3558,64 +3666,99 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.fontSize')}: {fontSize}%</label>
                 <div className="flex items-center gap-3">
-                                     <button
-                     onClick={() => changeFontSize(Math.max(50, fontSize - 10))}
-                     className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
-                   >
-                     A-
-                   </button>
-                  <div className="flex-1 h-2 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
+                  <button
+                    onClick={() => changeFontSize(Math.max(50, fontSize - 10))}
+                    className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
+                  >
+                    A-
+                  </button>
+                  <div className="flex-1 flex items-center h-8">
                     <input
                       type="range"
                       min="50"
                       max="200"
                       value={fontSize}
                       onChange={(e) => changeFontSize(parseInt(e.target.value))}
-                      className="w-full h-full appearance-none bg-transparent cursor-pointer"
+                      className="w-full h-2 appearance-none rounded-full cursor-pointer bg-gray-200 dark:bg-dark-700"
                       style={{
-                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${fontSize}%, #e5e7eb ${fontSize}%, #e5e7eb 100%)`
+                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(fontSize - 50) / 1.5}%, #e5e7eb ${(fontSize - 50) / 1.5}%, #e5e7eb 100%)`
                       }}
                     />
                   </div>
-                                     <button
-                     onClick={() => changeFontSize(Math.min(200, fontSize + 10))}
-                     className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
-                   >
-                     A+
-                   </button>
+                  <button
+                    onClick={() => changeFontSize(Math.min(200, fontSize + 10))}
+                    className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
+                  >
+                    A+
+                  </button>
                 </div>
               </div>
+            </div>
+
+            {/* Scroll Mode Selection */}
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                {t('reader.scrollMode')}
+              </label>
+              <div className="flex gap-2">
+                {[
+                  { id: 'paginated', name: t('reader.modePaginated') || 'Sayfalama', icon: <BookOpen className="w-5 h-5" /> },
+                  { id: 'scroll', name: t('reader.modeScroll') || 'Kaydırma', icon: <ScrollText className="w-5 h-5" /> }
+                ].map((mode) => (
+                  <button
+                    key={mode.id}
+                    onClick={() => {
+                      const newScrollMode = mode.id === 'scroll'
+                      if (newScrollMode !== scrollMode) {
+                        setScrollMode(newScrollMode)
+                        localStorage.setItem(`scrollMode_${bookId}`, String(newScrollMode))
+                      }
+                    }}
+                    className={`flex-1 py-3 px-4 rounded-xl border transition-all duration-200 ${(mode.id === 'scroll' ? scrollMode : !scrollMode)
+                      ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                      : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
+                      }`}
+                  >
+                    <div className="text-center flex flex-col items-center justify-center">
+                      <div className="mb-1">{mode.icon}</div>
+                      <div className="text-sm font-medium">{mode.name}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                {t('reader.scrollModeHint')}
+              </p>
             </div>
 
             {/* Bookmark Section */}
             <div className="mt-6">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.bookmarks')}</label>
               <div className="flex items-center gap-3">
-                                 <button
-                   onClick={toggleBookmark}
-                   className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${
-                     isBookmarked 
-                       ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400' 
-                       : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
-                   }`}
-                 >
+                <button
+                  onClick={toggleBookmark}
+                  className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${isBookmarked
+                    ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                    : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
+                    }`}
+                >
                   {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
-                   <span className="text-sm font-medium">{isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}</span>
+                  <span className="text-sm font-medium">{isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}</span>
                 </button>
-                
+
                 <span className="text-sm text-gray-600 dark:text-gray-400">
-                  {bookmarks.length} yer işareti
+                  {t('reader.bookmarksCount', { count: bookmarks.length })}
                 </span>
               </div>
             </div>
 
             {/* Reset Button */}
             <div className="mt-6">
-                             <button
-                 onClick={resetReader}
-                 className="flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
-               >
-                 <RotateCcw className="w-4 h-4" />
+              <button
+                onClick={resetReader}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" />
                 {t('reader.reset')}
               </button>
             </div>
@@ -3626,10 +3769,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       {/* Book Reader - Improved Layout */}
       <div className="flex-1 relative overflow-hidden">
         {blobUrl ? (
-          <div className={`w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${
-            isFullscreen ? 'fullscreen' : ''
-          } ${!isFullscreen ? 'md:pb-8' : ''}`}>
+          <div
+            className={`w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${isFullscreen ? 'fullscreen' : ''
+              } ${!isFullscreen ? 'md:pb-8' : ''} ${scrollMode ? 'scroll-mode' : ''}`}
+            style={{ overflowX: 'hidden' }}
+          >
             <ReactReader
+              key={`reader-${scrollMode ? 'scroll' : 'paginated'}`}
               url={blobUrl}
               location={location}
               locationChanged={locationChanged}
@@ -3647,7 +3793,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <BookOpen className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-            <p className="text-gray-600 dark:text-gray-400">{isLoading ? t('common.loading') : t('reader.loadErrorTitle')}</p>
+              <p className="text-gray-600 dark:text-gray-400">{isLoading ? t('common.loading') : t('reader.loadErrorTitle')}</p>
               {error && (
                 <p className="text-red-500 text-sm mt-2">{error}</p>
               )}
@@ -3656,9 +3802,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         )}
 
         {/* Fullscreen Toggle Button - Top Right */}
-        <div className={`md:hidden fixed top-12 right-6 z-50 transition-all duration-300 ${
-          isFullscreen ? 'block' : 'hidden'
-        }`}>
+        <div className={`md:hidden fixed top-12 right-6 z-50 transition-all duration-300 ${isFullscreen ? 'block' : 'hidden'
+          }`}>
           <button
             onClick={toggleFullscreen}
             className="p-2 text-gray-600/50 dark:text-white/50 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -3672,9 +3817,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       {/* Mobile Bottom Navigation - Kompakt */}
       <div
         ref={bottomNavRef}
-        className={`md:hidden flex-shrink-0 bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-t border-white/30 dark:border-dark-700/30 shadow-lg transition-all duration-300 z-30 ${iosBottomSafeAreaClass} ${
-        isFullscreen ? 'hidden' : ''
-      }`}>
+        className={`md:hidden flex-shrink-0 bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-t border-white/30 dark:border-dark-700/30 shadow-lg transition-all duration-300 z-30 ${iosBottomSafeAreaClass} ${isFullscreen ? 'hidden' : ''
+          }`}>
         <div className="px-4 py-2">
           {/* Navigasyon butonları - mobil */}
           <div className="flex items-center justify-between">
@@ -3683,9 +3827,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors"
             >
               <ChevronLeft className="w-3 h-3" />
-              <span className="text-xs">Önceki</span>
+              <span className="text-xs">{t('reader.previous')}</span>
             </button>
-            
+
             <div className="flex flex-col items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
               {totalPages > 0 && (
                 <form
@@ -3714,12 +3858,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 </form>
               )}
             </div>
-            
+
             <button
               onClick={goToNext}
               className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors"
             >
-              <span className="text-xs">Sonraki</span>
+              <span className="text-xs">{t('reader.next')}</span>
               <ChevronRight className="w-3 h-3" />
             </button>
           </div>
@@ -3727,9 +3871,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       </div>
 
       {/* Bottom Status Bar - Kompakt */}
-      <div className={`hidden md:block fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-white/30 dark:border-dark-700/30 transition-all duration-300 z-10 ${
-        isFullscreen ? 'hidden' : ''
-      }`}>
+      <div className={`hidden md:block fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-white/30 dark:border-dark-700/30 transition-all duration-300 z-10 ${isFullscreen ? 'hidden' : ''
+        }`}>
         <div className="max-w-7xl mx-auto px-4 py-1.5">
           <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
             <div className="flex items-center gap-3">
@@ -3748,7 +3891,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                   <span>•</span>
                 </>
               )}
-              <span>{bookmarks.length} yer işareti</span>
+              <span>{t('reader.bookmarksCount', { count: bookmarks.length })}</span>
             </div>
           </div>
         </div>
@@ -3801,22 +3944,21 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               bg-white/85 dark:bg-dark-900/85 
               backdrop-blur-xl border border-white/20 dark:border-dark-700/30
               rounded-xl shadow-2xl ring-1 ring-black/5 dark:ring-white/5
-              ${showToast.type === 'success' 
-                ? 'bg-gradient-to-br from-emerald-50/70 to-green-50/70 dark:from-emerald-950/50 dark:to-green-950/50' 
-                : showToast.type === 'error' 
-                ? 'bg-gradient-to-br from-red-50/70 to-rose-50/70 dark:from-red-950/50 dark:to-rose-950/50'
-                : 'bg-gradient-to-br from-blue-50/70 to-indigo-50/70 dark:from-blue-950/50 dark:to-indigo-950/50'
+              ${showToast.type === 'success'
+                ? 'bg-gradient-to-br from-emerald-50/70 to-green-50/70 dark:from-emerald-950/50 dark:to-green-950/50'
+                : showToast.type === 'error'
+                  ? 'bg-gradient-to-br from-red-50/70 to-rose-50/70 dark:from-red-950/50 dark:to-rose-950/50'
+                  : 'bg-gradient-to-br from-blue-50/70 to-indigo-50/70 dark:from-blue-950/50 dark:to-indigo-950/50'
               }
             `}>
               {/* Accent Border */}
-              <div className={`absolute inset-y-0 left-0 w-[2px] ${
-                showToast.type === 'success' 
-                  ? 'bg-gradient-to-b from-emerald-500 to-green-600' 
-                  : showToast.type === 'error' 
+              <div className={`absolute inset-y-0 left-0 w-[2px] ${showToast.type === 'success'
+                ? 'bg-gradient-to-b from-emerald-500 to-green-600'
+                : showToast.type === 'error'
                   ? 'bg-gradient-to-b from-red-500 to-rose-600'
                   : 'bg-gradient-to-b from-blue-500 to-indigo-600'
-              }`} />
-              
+                }`} />
+
               <div className="p-2.5 pl-4">
                 <div className="flex items-start gap-2">
                   <div className="flex-shrink-0">
@@ -3830,7 +3972,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                       <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                     )}
                   </div>
-                  
+
                   <div className="flex-1 pt-0.5">
                     <p className="text-[12px] font-semibold text-gray-900 dark:text-gray-100">
                       {showToast.type === 'success' && t('reader.toastTitles.success')}
@@ -3854,13 +3996,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
               <div className="h-px w-full bg-gray-200/30 dark:bg-dark-700/30">
                 <div
-                  className={`h-full transition-all duration-[3000ms] ease-linear ${
-                    showToast.type === 'success' 
-                      ? 'bg-gradient-to-r from-emerald-500 to-green-500' 
-                      : showToast.type === 'error' 
+                  className={`h-full transition-all duration-[3000ms] ease-linear ${showToast.type === 'success'
+                    ? 'bg-gradient-to-r from-emerald-500 to-green-500'
+                    : showToast.type === 'error'
                       ? 'bg-gradient-to-r from-red-500 to-rose-500'
                       : 'bg-gradient-to-r from-blue-500 to-indigo-500'
-                  }`}
+                    }`}
                   style={{ width: '100%' }}
                 />
               </div>
