@@ -46,6 +46,7 @@ export const AudioBookPage: React.FC<AudioBookPageProps> = ({
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
 
     const iosSafeAreaClass = isIOSDevice ? 'ios-safe-area' : ''
+    const iosNavSafeAreaClass = isIOSDevice ? 'ios-nav-safe-area' : ''
 
     // Manifest veya SRT dosyalarını yükle
     const loadTranscriptData = useCallback(async () => {
@@ -265,7 +266,7 @@ export const AudioBookPage: React.FC<AudioBookPageProps> = ({
     return (
         <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 ${iosSafeAreaClass}`}>
             {/* Header */}
-            <header className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg sticky top-0 z-50">
+            <header className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg sticky top-0 z-50 ${iosNavSafeAreaClass}`}>
                 <div className="max-w-7xl mx-auto px-4 py-3">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">

@@ -56,22 +56,25 @@ export const AudioBookPlayer: React.FC<AudioBookPlayerProps> = ({
   const [activeWordIndex, setActiveWordIndex] = useState(-1)
   const [autoScroll, setAutoScroll] = useState(true)
   const [syncOffset, setSyncOffset] = useState(0) // Senkron ayarı: negatif = yazı geride, pozitif = yazı ileride
-  const [currentAudioUrl, setCurrentAudioUrl] = useState(audioUrl)
   const [pendingPlay, setPendingPlay] = useState(false) // Audio yüklendikten sonra otomatik oynat
 
   // Mevcut chapter
   const currentChapter = chapters[activeChapterIndex] || null
 
-  // Chapter'a özel audio varsa, chapter değiştiğinde audio'yu değiştir
+  // Chapter'a özel audio varsa, chapter değiştiğinde audio'yu değiştir (derived)
   const hasChapterAudio = chapters.some(ch => ch.audioUrl)
 
+  // Derived audio URL to prevent extra render cycles
+  const currentAudioUrl = hasChapterAudio && currentChapter?.audioUrl
+    ? currentChapter.audioUrl
+    : audioUrl
+
+  // Force load when source changes (helps with iOS autoplay)
   useEffect(() => {
-    if (hasChapterAudio && currentChapter?.audioUrl) {
-      setCurrentAudioUrl(currentChapter.audioUrl)
-    } else {
-      setCurrentAudioUrl(audioUrl)
+    if (audioRef.current) {
+      audioRef.current.load()
     }
-  }, [activeChapterIndex, currentChapter, hasChapterAudio, audioUrl])
+  }, [currentAudioUrl])
 
   // Chapter başlangıç zamanlarını hesapla
   const chapterStartTimes = useRef<number[]>([])
@@ -223,9 +226,24 @@ export const AudioBookPlayer: React.FC<AudioBookPlayerProps> = ({
   useEffect(() => {
     if (!autoScroll || !activeCueRef.current || !transcriptRef.current) return
 
-    activeCueRef.current.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center'
+    const container = transcriptRef.current
+    const element = activeCueRef.current
+
+    // scrollIntoView bazen tüm sayfayı kaydırabiliyor (focusluyor), bu yüzden manuel hesaplama ile sadece konteyneri kaydırıyoruz
+    const elementRect = element.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+
+    // Elementin konteynerin üstüne göre konumu (görsel olarak)
+    const relativeTop = elementRect.top - containerRect.top
+    const currentScroll = container.scrollTop
+
+    // Hedef: Element konteynerin ortasında olsun
+    // Hedef Scroll = Mevcut Scroll + Göreceli Konum - (Konteyner Yüksekliği / 2) + (Element Yüksekliği / 2)
+    const targetScroll = currentScroll + relativeTop - (container.clientHeight / 2) + (element.clientHeight / 2)
+
+    container.scrollTo({
+      top: targetScroll,
+      behavior: 'smooth'
     })
   }, [activeCueIndex, autoScroll])
 
