@@ -335,14 +335,14 @@ function App() {
         <header className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg sticky top-0 z-50 ${iosNavSafeAreaClass}`}>
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 md:gap-4">
                 <img
                   src="/logo-512.png"
                   alt="App Logo"
-                  className="w-10 h-10 rounded-xl shadow-lg object-cover"
+                  className="w-8 h-8 md:w-10 md:h-10 rounded-xl shadow-lg object-cover"
                 />
                 <div>
-                  <h1 className="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent">
+                  <h1 className="text-base md:text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent whitespace-nowrap">
                     {t('app.name')}
                   </h1>
                 </div>

@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Biblionary",
+    "name": "Risale-i Nur - AI",
     "dark": "Switch to dark mode",
     "light": "Switch to light mode",
     "userMenu": "User menu",
@@ -21,7 +21,10 @@
     "close": "Close",
     "paste": "Paste",
     "public": "Public",
-    "startReading": "Start Reading"
+    "startReading": "Start Reading",
+    "download": "Download",
+    "remove": "Remove",
+    "undo": "Undo"
   },
   "auth": {
     "welcome": "Welcome!",
@@ -155,6 +158,16 @@
     "modeScroll": "Scroll",
     "scrollModeHint": "Scroll mode uses vertical scrolling instead of page turns. May help with text selection issues on Android."
   },
+  "audiobook": {
+    "chapter": "Chapter",
+    "chapters": "Chapters",
+    "currentChapter": "Current chapter",
+    "selectChapter": "Select chapter",
+    "noChapters": "No chapters found",
+    "chaptersRemaining": "chapters remaining",
+    "syncOffset": "Subtitle Sync",
+    "syncOffsetHint": "Use negative values if text is ahead, positive if text is behind"
+  },
   "profile": {
     "title": "My Profile",
     "subtitle": "View and manage your account information",
@@ -273,6 +286,7 @@
       "supportedFormats": "Supported formats: EPUB, PDF",
       "chooseFile": "Choose File",
       "noFile": "No file selected",
+      "fileExisting": "A file is already attached (select a new file to replace)",
       "usersLabel": "Users to grant access ({{count}} selected)",
       "usersPlaceholder": "Select users...",
       "usersSearch": "Search user...",
@@ -282,11 +296,12 @@
       "audioSectionTitle": "Audiobook (Optional)",
       "audioSectionHint": "If you upload an audio file and transcript, users can listen to the book while seeing the exact part being read on the screen.",
       "audioFile": "Audio File",
-      "audioFileHint": "e.g. MP3, M4A... Used only for playback.",
+      "audioFileHint": "Single MP3/M4A file or ZIP archive with chapter-based audio files.",
       "audioFileExisting": "An audio file is already attached (select a new file to replace)",
       "transcriptFile": "Transcript File",
-      "transcriptFileHint": "Whisper-style JSON transcript. See the 'seslikitap' folder for an example.",
+      "transcriptFileHint": "ZIP archive with SRT files or a single SRT/JSON file. Supports ElevenLabs export format.",
       "transcriptFileExisting": "A transcript file is already attached (select a new file to replace)",
+      "fileRemoved": "File will be removed (after saving)",
       "save": "Save",
       "saving": "Saving..."
     },

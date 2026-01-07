@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.mithat.biblionary',
-  appName: 'Biblionary',
+  appId: 'com.risaleinurai.app',
+  appName: 'Risale-i Nur - AI',
   webDir: 'dist',
   server: {
     androidScheme: 'https'
@@ -20,7 +20,7 @@ const config: CapacitorConfig = {
   },
   ios: {
     // iOS özel ayarları
-    scheme: 'biblionary',
+    scheme: 'risaleinurai',
     limitsNavigationsToAppBoundDomains: false,
     webContentsDebuggingEnabled: true
   }

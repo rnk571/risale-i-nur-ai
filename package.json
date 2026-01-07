@@ -1,5 +1,5 @@
 {
-  "name": "biblionary",
+  "name": "risale-i-nur-ai",
   "private": true,
   "version": "1.0.1",
   "type": "module",
@@ -34,6 +34,7 @@
     "@types/react-router-dom": "^5.3.3",
     "i18next": "^23.10.1",
     "i18next-browser-languagedetector": "^8.0.0",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.536.0",
     "pdfjs-dist": "^3.11.174",
     "react": "^19.1.0",

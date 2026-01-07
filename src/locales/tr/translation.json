@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Biblionary",
+    "name": "Risale-i Nur - AI",
     "dark": "Koyu moda geç",
     "light": "Açık moda geç",
     "userMenu": "Kullanıcı menüsü",
@@ -21,7 +21,10 @@
     "close": "Kapat",
     "paste": "Yapıştır",
     "public": "Herkese Açık",
-    "startReading": "Okumaya Başla"
+    "startReading": "Okumaya Başla",
+    "download": "İndir",
+    "remove": "Kaldır",
+    "undo": "Geri Al"
   },
   "auth": {
     "welcome": "Hoş Geldiniz!",
@@ -155,6 +158,16 @@
     "modeScroll": "Kaydırma",
     "scrollModeHint": "Kaydırma modu, sayfa geçişleri yerine dikey kaydırma kullanır. Android'de metin seçimi sorunlarını giderebilir."
   },
+  "audiobook": {
+    "chapter": "Bölüm",
+    "chapters": "Bölümler",
+    "currentChapter": "Şu anki bölüm",
+    "selectChapter": "Bölüm seç",
+    "noChapters": "Bölüm bulunamadı",
+    "chaptersRemaining": "bölüm kaldı",
+    "syncOffset": "Yazı Senkronu",
+    "syncOffsetHint": "Yazı ileride gidiyorsa negatif, geride kalıyorsa pozitif değer ayarlayın"
+  },
   "highlight": "Vurgula",
   "copy": "Kopyala",
   "search": "Ara",
@@ -277,6 +290,7 @@
       "supportedFormats": "Desteklenen formatlar: EPUB, PDF",
       "chooseFile": "Dosya Seç",
       "noFile": "Dosya seçilmedi",
+      "fileExisting": "Mevcut dosya kayıtlı (değiştirmek için yeni dosya seçin)",
       "usersLabel": "Erişim Verilecek Kullanıcılar ({{count}} seçili)",
       "usersPlaceholder": "Kullanıcı seçin...",
       "usersSearch": "Kullanıcı ara...",
@@ -286,11 +300,12 @@
       "audioSectionTitle": "Sesli Kitap (Opsiyonel)",
       "audioSectionHint": "Ses dosyası ve transkript yüklerseniz, kullanıcılar kitabı sesli olarak dinlerken okunan kısmı ekranda senkronize görebilir.",
       "audioFile": "Ses Dosyası",
-      "audioFileHint": "Örn. MP3, M4A... Sadece dinleme için kullanılacak.",
+      "audioFileHint": "Tek MP3/M4A dosyası veya chapter bazlı ses dosyaları içeren ZIP arşivi.",
       "audioFileExisting": "Mevcut ses dosyası kayıtlı (değiştirmek için yeni dosya seçin)",
       "transcriptFile": "Transkript Dosyası",
-      "transcriptFileHint": "Whisper formatında JSON transkript. Örneğe 'seslikitap' klasöründen bakabilirsiniz.",
+      "transcriptFileHint": "SRT dosyalarını içeren ZIP arşivi veya tek bir SRT/JSON dosyası. ElevenLabs'tan export edilen formatı destekler.",
       "transcriptFileExisting": "Mevcut transkript dosyası kayıtlı (değiştirmek için yeni dosya seçin)",
+      "fileRemoved": "Dosya kaldırılacak (kaydettikten sonra)",
       "save": "Kaydet",
       "saving": "Kaydediliyor..."
     },
