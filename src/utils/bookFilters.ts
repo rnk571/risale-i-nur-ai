@@ -9,7 +9,7 @@ export const filterAndSortBooks = (
   return books
     .filter(book => {
       // Arama terimi filtresi
-      const matchesSearch = !searchTerm || 
+      const matchesSearch = !searchTerm ||
         book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         book.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (book.description && book.description.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -33,7 +33,12 @@ export const filterAndSortBooks = (
         (filters.accessType === 'public' && book.is_public) ||
         (filters.accessType === 'private' && !book.is_public)
 
-      return matchesSearch && matchesStatus && matchesLanguage && matchesFormat && matchesAccessType
+      // Kitap boyutu filtresi
+      const matchesBookSize = filters.bookSize === 'all' ||
+        book.book_size === filters.bookSize ||
+        (!book.book_size && filters.bookSize === 'small') // Varsayılan değer small
+
+      return matchesSearch && matchesStatus && matchesLanguage && matchesFormat && matchesAccessType && matchesBookSize
     })
     .sort((a, b) => {
       switch (filters.sortBy) {

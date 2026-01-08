@@ -366,7 +366,7 @@ function App() {
                   aria-label={t('app.switchLanguage')}
                 >
                   <span className="text-[10px] font-semibold uppercase">
-                    {i18n.language?.startsWith('tr') ? 'EN' : 'TR'}
+                    {i18n.language?.startsWith('tr') ? 'TR' : 'EN'}
                   </span>
                 </button>
 

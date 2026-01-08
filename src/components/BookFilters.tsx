@@ -7,6 +7,7 @@ export interface FilterState {
   language: 'all' | 'tr' | 'en'
   format: 'all' | 'epub' | 'pdf'
   accessType: 'all' | 'public' | 'private'
+  bookSize: 'all' | 'small' | 'large'
   sortBy: 'created_desc' | 'created_asc' | 'title_asc' | 'title_desc' | 'author_asc' | 'author_desc'
 }
 
@@ -15,6 +16,7 @@ export const defaultFilters: FilterState = {
   language: 'all',
   format: 'all',
   accessType: 'all',
+  bookSize: 'all',
   sortBy: 'created_desc'
 }
 
@@ -66,7 +68,7 @@ export const BookFilters: React.FC<BookFiltersProps> = ({
               ({filteredCount} / {totalCount} {t('library.totalBooks').toLowerCase()})
             </span>
           </div>
-          
+
           {/* Arama ve Filtre - Desktop'ta yan yana */}
           <div className="flex flex-col sm:flex-row gap-3 lg:items-center">
             {/* Arama Barı */}
@@ -97,11 +99,10 @@ export const BookFilters: React.FC<BookFiltersProps> = ({
             {/* Filtre Toggle */}
             <button
               onClick={onToggleFilters}
-              className={`flex items-center gap-2 px-4 py-3 rounded-xl transition-all duration-200 whitespace-nowrap ${
-                showFilters 
-                  ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' 
-                  : 'bg-white/60 dark:bg-dark-700/60 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600/60'
-              } border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl`}
+              className={`flex items-center gap-2 px-4 py-3 rounded-xl transition-all duration-200 whitespace-nowrap ${showFilters
+                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                : 'bg-white/60 dark:bg-dark-700/60 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600/60'
+                } border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl`}
             >
               <SlidersHorizontal className="w-4 h-4" />
               <span className="text-sm font-medium">{t('admin.filters')}</span>
@@ -176,6 +177,22 @@ export const BookFilters: React.FC<BookFiltersProps> = ({
                   <option value="all">{t('admin.filter.langAll')}</option>
                   <option value="public">{t('admin.filter.accessPublic')}</option>
                   <option value="private">{t('admin.filter.accessPrivate')}</option>
+                </select>
+              </div>
+
+              {/* Kitap Boyutu */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  {t('admin.filter.bookSize')}
+                </label>
+                <select
+                  value={filters.bookSize}
+                  onChange={(e) => handleFilterChange('bookSize', e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
+                >
+                  <option value="all">{t('admin.filter.sizeAll')}</option>
+                  <option value="small">{t('admin.filter.sizeSmall')}</option>
+                  <option value="large">{t('admin.filter.sizeLarge')}</option>
                 </select>
               </div>
 

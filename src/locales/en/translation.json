@@ -246,6 +246,10 @@
       "sortTitleDesc": "Title (Z-A)",
       "sortAuthorAsc": "Author (A-Z)",
       "sortAuthorDesc": "Author (Z-A)",
+      "bookSize": "Book Size",
+      "sizeLarge": "Large",
+      "sizeSmall": "Small",
+      "sizeAll": "All",
       "reset": "Reset Filters"
     },
     "table": {

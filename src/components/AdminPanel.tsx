@@ -201,6 +201,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
           description: parsed.description || '',
           cover_image: parsed.cover_image || '',
           language: (parsed.language === 'en' ? 'en' : 'tr') as 'tr' | 'en',
+          book_size: (parsed.book_size === 'large' ? 'large' : 'small') as 'small' | 'large',
           is_public: !!parsed.is_public,
           epub_file: null as File | null, // File objeleri serialize edilemez
           audio_file: null as File | null,
@@ -220,6 +221,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       description: '',
       cover_image: '',
       language: 'tr' as 'tr' | 'en',
+      book_size: 'small' as 'small' | 'large',
       is_public: false,
       epub_file: null as File | null,
       audio_file: null as File | null,
@@ -730,6 +732,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         description: formData.description,
         cover_image: formData.cover_image,
         language: formData.language,
+        book_size: formData.book_size,
         is_public: !!formData.is_public,
         epub_file_path: epubUrl,
         audio_file_path: audioUrl,
@@ -789,6 +792,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         description: '',
         cover_image: '',
         language: 'tr',
+        book_size: 'small',
         is_public: false,
         epub_file: null,
         audio_file: null,
@@ -857,6 +861,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         description: book.description || '',
         cover_image: book.cover_image || '',
         language: (book.language as 'tr' | 'en') || 'tr',
+        book_size: (book.book_size as 'small' | 'large') || 'small',
         is_public: !!book.is_public,
         epub_file: null,
         audio_file: null,
@@ -919,6 +924,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                 description: '',
                 cover_image: '',
                 language: 'tr',
+                book_size: 'small',
                 is_public: false,
                 epub_file: null,
                 audio_file: null,
@@ -1095,6 +1101,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                         >
                           <option value="tr">{t('admin.filter.langTr')}</option>
                           <option value="en">{t('admin.filter.langEn')}</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          {t('admin.filter.bookSize')}
+                        </label>
+                        <select
+                          value={formData.book_size}
+                          onChange={(e) => setFormData({ ...formData, book_size: e.target.value as 'small' | 'large' })}
+                          className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 dark:text-gray-100"
+                        >
+                          <option value="small">{t('admin.filter.sizeSmall')}</option>
+                          <option value="large">{t('admin.filter.sizeLarge')}</option>
                         </select>
                       </div>
                     </div>
@@ -1396,6 +1416,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                           description: '',
                           cover_image: '',
                           language: 'tr',
+                          book_size: 'small',
                           is_public: false,
                           epub_file: null,
                           audio_file: null,

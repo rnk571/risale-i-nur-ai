@@ -155,87 +155,209 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-            {filteredBooks.map((book, index) => (
-              <div
-                key={book.id}
-                onClick={() => onBookSelect(book)}
-                className="group cursor-pointer"
-                style={{ animationDelay: `${index * 50}ms` }}
-              >
-                <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm rounded-2xl p-4 border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-2xl transform hover:scale-[1.02] transition-all duration-300 group-hover:bg-white/90 dark:group-hover:bg-dark-700/90">
-                  {/* Book Cover */}
-                  <div className="aspect-[3/4] bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 dark:from-blue-600 dark:via-purple-600 dark:to-indigo-700 rounded-xl relative overflow-hidden mb-4 shadow-lg">
-                    {book.cover_image ? (
-                      <img
-                        src={book.cover_image}
-                        alt={book.title}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <BookOpen className="w-12 h-12 text-white opacity-80 flex-shrink-0" />
-                      </div>
-                    )}
-                    
-                    {/* Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    
-                    {/* Play Icon */}
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
-                      <div className="w-12 h-12 bg-white/90 dark:bg-dark-700/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
-                        <div className="w-0 h-0 border-l-[8px] border-l-blue-600 dark:border-l-blue-400 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent ml-1"></div>
-                      </div>
+          <div className="space-y-12">
+            {/* Büyük Boy Kitaplar */}
+            {(() => {
+              const largeBooks = filteredBooks.filter(book => book.book_size === 'large')
+              if (largeBooks.length === 0) return null
+              return (
+                <div>
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl flex items-center justify-center shadow-lg">
+                      <BookOpen className="w-5 h-5 text-white flex-shrink-0" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{t('admin.filter.sizeLarge')}</h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{largeBooks.length} {t('library.totalBooks').toLowerCase()}</p>
                     </div>
                   </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                    {largeBooks.map((book, index) => (
+                      <div
+                        key={book.id}
+                        onClick={() => onBookSelect(book)}
+                        className="group cursor-pointer"
+                        style={{ animationDelay: `${index * 50}ms` }}
+                      >
+                        <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm rounded-2xl p-4 border-2 border-amber-300 dark:border-amber-600/50 shadow-lg hover:shadow-2xl transform hover:scale-[1.02] transition-all duration-300 group-hover:bg-white/90 dark:group-hover:bg-dark-700/90 ring-2 ring-amber-200/50 dark:ring-amber-700/30">
+                          {/* Book Cover */}
+                          <div className="aspect-[3/4] bg-gradient-to-br from-amber-500 via-orange-500 to-red-500 dark:from-amber-600 dark:via-orange-600 dark:to-red-600 rounded-xl relative overflow-hidden mb-4 shadow-lg">
+                            {book.cover_image ? (
+                              <img
+                                src={book.cover_image}
+                                alt={book.title}
+                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <BookOpen className="w-12 h-12 text-white opacity-80 flex-shrink-0" />
+                              </div>
+                            )}
 
-                  {/* Book Info */}
-                  <div className="space-y-2">
-                    <h3 className="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-200 text-sm leading-tight">
-                      {book.title}
-                    </h3>
-                    <div className="flex items-center gap-2">
-                       <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{book.author}</p>
-                    </div>
-                    {book.description && (
-                      <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2 leading-relaxed">
-                        {book.description}
-                      </p>
-                    )}
-                    {/* Badges at bottom */}
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
-                        book.language === 'en'
-                          ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
-                          : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
-                      }`}>
-                        {book.language === 'en' ? 'EN' : 'TR'}
-                      </span>
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                        {((book as any).epub_file_path || '').toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}
-                      </span>
-                      {(book as any).audio_file_path && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
-                          {t('library.audioBook')}
-                        </span>
-                      )}
-                      {book.is_public && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
-                          {t('common.public')}
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                            {/* Overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                  {/* Read Button */}
-                  <div className="mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                    <div className="w-full py-2 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 text-white text-xs font-semibold rounded-xl text-center shadow-lg">
-                      {t('common.startReading')}
-                    </div>
+                            {/* Play Icon */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
+                              <div className="w-12 h-12 bg-white/90 dark:bg-dark-700/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
+                                <div className="w-0 h-0 border-l-[8px] border-l-amber-600 dark:border-l-amber-400 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent ml-1"></div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Book Info */}
+                          <div className="space-y-2">
+                            <h3 className="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors duration-200 text-sm leading-tight">
+                              {book.title}
+                            </h3>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{book.author}</p>
+                            </div>
+                            {book.description && (
+                              <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2 leading-relaxed">
+                                {book.description}
+                              </p>
+                            )}
+                            {/* Badges at bottom */}
+                            <div className="mt-2 flex items-center gap-2 flex-wrap">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300">
+                                {t('admin.filter.sizeLarge')}
+                              </span>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${book.language === 'en'
+                                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                                }`}>
+                                {book.language === 'en' ? 'EN' : 'TR'}
+                              </span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                                {((book as any).epub_file_path || '').toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}
+                              </span>
+                              {(book as any).audio_file_path && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
+                                  {t('library.audioBook')}
+                                </span>
+                              )}
+                              {book.is_public && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
+                                  {t('common.public')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Read Button */}
+                          <div className="mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <div className="w-full py-2 px-4 bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-500 dark:to-orange-500 text-white text-xs font-semibold rounded-xl text-center shadow-lg">
+                              {t('common.startReading')}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </div>
-            ))}
+              )
+            })()}
+
+            {/* Küçük Boy Kitaplar */}
+            {(() => {
+              const smallBooks = filteredBooks.filter(book => !book.book_size || book.book_size === 'small')
+              if (smallBooks.length === 0) return null
+              return (
+                <div>
+                  <div className="flex items-center gap-3 mb-6">
+                    <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg">
+                      <BookOpen className="w-5 h-5 text-white flex-shrink-0" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{t('admin.filter.sizeSmall')}</h2>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">{smallBooks.length} {t('library.totalBooks').toLowerCase()}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                    {smallBooks.map((book, index) => (
+                      <div
+                        key={book.id}
+                        onClick={() => onBookSelect(book)}
+                        className="group cursor-pointer"
+                        style={{ animationDelay: `${index * 50}ms` }}
+                      >
+                        <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm rounded-2xl p-4 border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-2xl transform hover:scale-[1.02] transition-all duration-300 group-hover:bg-white/90 dark:group-hover:bg-dark-700/90">
+                          {/* Book Cover */}
+                          <div className="aspect-[3/4] bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 dark:from-blue-600 dark:via-purple-600 dark:to-indigo-700 rounded-xl relative overflow-hidden mb-4 shadow-lg">
+                            {book.cover_image ? (
+                              <img
+                                src={book.cover_image}
+                                alt={book.title}
+                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <BookOpen className="w-12 h-12 text-white opacity-80 flex-shrink-0" />
+                              </div>
+                            )}
+
+                            {/* Overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                            {/* Play Icon */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
+                              <div className="w-12 h-12 bg-white/90 dark:bg-dark-700/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
+                                <div className="w-0 h-0 border-l-[8px] border-l-blue-600 dark:border-l-blue-400 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent ml-1"></div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Book Info */}
+                          <div className="space-y-2">
+                            <h3 className="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-200 text-sm leading-tight">
+                              {book.title}
+                            </h3>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{book.author}</p>
+                            </div>
+                            {book.description && (
+                              <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2 leading-relaxed">
+                                {book.description}
+                              </p>
+                            )}
+                            {/* Badges at bottom */}
+                            <div className="mt-2 flex items-center gap-2 flex-wrap">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${book.language === 'en'
+                                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
+                                : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                                }`}>
+                                {book.language === 'en' ? 'EN' : 'TR'}
+                              </span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                                {((book as any).epub_file_path || '').toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}
+                              </span>
+                              {(book as any).audio_file_path && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
+                                  {t('library.audioBook')}
+                                </span>
+                              )}
+                              {book.is_public && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
+                                  {t('common.public')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Read Button */}
+                          <div className="mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            <div className="w-full py-2 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 text-white text-xs font-semibold rounded-xl text-center shadow-lg">
+                              {t('common.startReading')}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
       </div>

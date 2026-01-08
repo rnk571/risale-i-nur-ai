@@ -58,6 +58,10 @@ ALTER TABLE public.books
 ALTER TABLE public.books
     ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT false;
 
+-- Mevcut kurulumlar için kitap boyutu sütununu ekle
+ALTER TABLE public.books
+    ADD COLUMN IF NOT EXISTS book_size TEXT DEFAULT 'small' CHECK (book_size IN ('small', 'large'));
+
 -- 3. User Book Access tablosu (kullanıcıların hangi kitaplara erişimi olduğu)
 CREATE TABLE IF NOT EXISTS public.user_book_access (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,

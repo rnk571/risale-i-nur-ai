@@ -250,6 +250,10 @@
       "sortTitleDesc": "Başlık (Z-A)",
       "sortAuthorAsc": "Yazar (A-Z)",
       "sortAuthorDesc": "Yazar (Z-A)",
+      "bookSize": "Kitap Boyutu",
+      "sizeLarge": "Büyük Boy",
+      "sizeSmall": "Küçük Boy",
+      "sizeAll": "Tümü",
       "reset": "Filtreleri Temizle"
     },
     "table": {
