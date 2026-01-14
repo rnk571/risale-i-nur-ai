@@ -262,6 +262,12 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
             {/* Küçük Boy Kitaplar */}
             {(() => {
               const smallBooks = filteredBooks.filter(book => !book.book_size || book.book_size === 'small')
+
+              // Varsayılan sıralama (En Yeni) seçiliyse, küçük kitapları alfabetik sırala
+              if (filters.sortBy === 'created_desc') {
+                smallBooks.sort((a, b) => a.title.localeCompare(b.title, 'tr'))
+              }
+
               if (smallBooks.length === 0) return null
               return (
                 <div>
