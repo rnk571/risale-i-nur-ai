@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '../lib/supabase'
+import { trackEvent, analytics } from '../lib/analytics'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
 
 interface AuthProps {
@@ -45,6 +46,15 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         }
 
         if (data.user) {
+          // PostHog: Set user ID and track login event
+          analytics.setDistinctId(data.user.id)
+          trackEvent({
+            event: 'risaleinurai_user_logged_in',
+            properties: {
+              method: 'email',
+              source: 'auth_page'
+            }
+          })
           onAuthSuccess()
         }
       } else {
@@ -59,6 +69,15 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
         }
 
         if (data.user) {
+          // PostHog: Track registration event
+          analytics.setDistinctId(data.user.id)
+          trackEvent({
+            event: 'risaleinurai_user_registered',
+            properties: {
+              method: 'email',
+              source: 'auth_page'
+            }
+          })
           setMessage(t('auth.registerSuccess'))
           setIsLogin(true)
           setConfirmPassword('')
@@ -82,16 +101,16 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
           {/* Logo Section */}
           <div className="text-center mb-8">
             <div className="relative mx-auto w-16 h-16 mb-6">
-              <img 
-                src="/logo-512.png" 
-                alt="App Logo" 
+              <img
+                src="/logo-512.png"
+                alt="App Logo"
                 className="w-16 h-16 rounded-2xl shadow-lg object-cover"
               />
               <div className="absolute -top-2 -right-2 w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center">
                 <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
               </div>
             </div>
-            
+
             <h1 className="text-3xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-2 transition-colors duration-300">
               {isLogin ? t('auth.welcome') : t('auth.join')}
             </h1>
@@ -99,7 +118,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
               {isLogin ? t('auth.welcomeSubtitle') : t('auth.joinSubtitle')}
             </p>
           </div>
-          
+
           {/* Messages */}
           {error && (
             <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl text-sm flex items-center gap-3 transition-colors duration-300">
@@ -116,7 +135,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
               <span>{message}</span>
             </div>
           )}
-          
+
           {/* Form */}
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-4">
@@ -141,7 +160,7 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                   </div>
                 </div>
               </div>
-              
+
               {/* Password Field */}
               <div className="relative">
                 <label htmlFor="password" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-300">

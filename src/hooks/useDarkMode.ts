@@ -32,8 +32,8 @@ export const useDarkMode = () => {
       if (Capacitor.isNativePlatform()) {
         StatusBar.setStyle({ style: Style.Dark }).catch(() => { })
         if (Capacitor.getPlatform() === 'android') {
-          StatusBar.setOverlaysWebView({ overlay: true }).catch(() => { })
-          StatusBar.setBackgroundColor({ color: '#00000000' }).catch(() => { })
+          StatusBar.setOverlaysWebView({ overlay: false }).catch(() => { })
+          StatusBar.setBackgroundColor({ color: '#0B0F1A' }).catch(() => { })
           NavigationBar.setColor({ color: '#0f172a' }).catch(() => { })
         }
       }
@@ -44,8 +44,8 @@ export const useDarkMode = () => {
       if (Capacitor.isNativePlatform()) {
         StatusBar.setStyle({ style: Style.Light }).catch(() => { })
         if (Capacitor.getPlatform() === 'android') {
-          StatusBar.setOverlaysWebView({ overlay: true }).catch(() => { })
-          StatusBar.setBackgroundColor({ color: '#00000000' }).catch(() => { })
+          StatusBar.setOverlaysWebView({ overlay: false }).catch(() => { })
+          StatusBar.setBackgroundColor({ color: '#f8fafc' }).catch(() => { })
           NavigationBar.setColor({ color: '#ffffff' }).catch(() => { })
         }
       }

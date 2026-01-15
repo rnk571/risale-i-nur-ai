@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { supabase, type Book } from './lib/supabase'
+import { trackEvent } from './lib/analytics'
 import { Auth } from './components/Auth'
 import { BookLibrary } from './components/BookLibrary'
 import { EpubReader } from './components/EpubReader'
@@ -255,6 +256,15 @@ function App() {
     if (hasAudio) {
       setBookOpenChoice(book)
     } else {
+      // PostHog: Track book opened as text (no audio option)
+      trackEvent({
+        event: 'risaleinurai_book_opened',
+        properties: {
+          book_id: book.id,
+          book_title: book.title,
+          mode: 'text'
+        }
+      })
       setSelectedBook(book)
       setViewMode('reader')
     }
@@ -298,6 +308,13 @@ function App() {
   }
 
   const handleLogout = async () => {
+    // PostHog: Track logout
+    trackEvent({
+      event: 'risaleinurai_user_logged_out',
+      properties: {
+        source: 'user_menu'
+      }
+    })
     await supabase.auth.signOut()
   }
 
@@ -543,6 +560,15 @@ function App() {
                     <button
                       type="button"
                       onClick={() => {
+                        // PostHog: Track book opened as text
+                        trackEvent({
+                          event: 'risaleinurai_book_opened',
+                          properties: {
+                            book_id: bookOpenChoice.id,
+                            book_title: bookOpenChoice.title,
+                            mode: 'text'
+                          }
+                        })
                         setSelectedBook(bookOpenChoice)
                         setViewMode('reader')
                         setBookOpenChoice(null)
@@ -565,6 +591,15 @@ function App() {
                     <button
                       type="button"
                       onClick={() => {
+                        // PostHog: Track book opened as audiobook
+                        trackEvent({
+                          event: 'risaleinurai_audiobook_started',
+                          properties: {
+                            book_id: bookOpenChoice.id,
+                            book_title: bookOpenChoice.title,
+                            mode: 'audio'
+                          }
+                        })
                         setSelectedBook(bookOpenChoice)
                         setViewMode('audio')
                         setBookOpenChoice(null)

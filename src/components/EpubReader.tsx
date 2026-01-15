@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ReactReader, ReactReaderStyle } from 'react-reader'
 import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info, Search, Clipboard, ScrollText } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType, addHighlight, getHighlights, updateHighlight, deleteHighlight, type Highlight } from '../lib/progressService'
+import { trackEvent } from '../lib/analytics'
 import { BookmarkNoteModal } from './BookmarkNoteModal'
 import { HighlightModal } from './HighlightModal'
 import { HighlightPanel } from './HighlightPanel'
@@ -62,7 +63,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   initialHighlightCfi
 }) => {
   const { t } = useTranslation()
-  const [location, setLocation] = useState<string | number>(initialLocation || 0)
+  const [location, setLocation] = useState<string | number>(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -132,9 +133,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const isFullscreenRef = useRef<boolean>(false)
+  const prevIsFullscreenRef = useRef<boolean>(false)
   const contentDocsRef = useRef<Set<Document>>(new Set())
   const searchHighlightCfiRef = useRef<string | null>(null)
   const hasNavigatedToInitialHighlightRef = useRef<boolean>(false)
+  const hasNavigatedToInitialLocationRef = useRef<boolean>(false)
   const preExitLocationRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -637,6 +640,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             // - Tam ekranda swipe/tap hareketlerini yönet
             if (isMobile || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)) {
               doc.addEventListener('selectionchange', () => {
+                if (suppressNextSelectionRef.current) return
                 setShowContextMenu(false)
                 setPendingHighlight(null)
               })
@@ -1504,6 +1508,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           updated_at: new Date().toISOString()
         }
         setHighlights([...highlights, newHighlight])
+
+        // PostHog: Track highlight created
+        trackEvent({
+          event: 'risaleinurai_highlight_created',
+          properties: {
+            book_id: bookId,
+            color: color
+          }
+        })
+
         showToastMessage(t('reader.toasts.highlightAdded'), 'success')
       }
     } catch (error) {
@@ -1958,6 +1972,37 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     handleHighlightClick(target)
   }, [initialHighlightCfi, highlights])
 
+  // Global listeden gelen ilk yer işareti (bookmark) için, rendition hazır olduktan sonra
+  // explicit olarak konuma git. ReactReader'ın location prop'u bazen erken set edildiğinde
+  // içerik tam render olmayabiliyor, bu yüzden rendition hazır olduktan sonra display() çağrısı yapıyoruz.
+  useEffect(() => {
+    if (!initialLocation || hasNavigatedToInitialLocationRef.current) return
+    if (!renditionRef.current) return
+    // Loading bitene kadar bekle
+    if (isLoading) return
+
+    console.log('Bookmark navigation: initialLocation ile gidiliyor:', initialLocation)
+    hasNavigatedToInitialLocationRef.current = true
+
+    // Rendition hazır, explicit olarak konuma git
+    try {
+      renditionRef.current.display(initialLocation)
+
+      // Navigasyon sonrası highlight'ları yeniden render et
+      setTimeout(() => {
+        try {
+          if (highlights && highlights.length > 0) {
+            renderHighlights()
+          }
+        } catch (err) {
+          console.error('Bookmark navigation highlight re-render hatası:', err)
+        }
+      }, 600)
+    } catch (error) {
+      console.error('Bookmark navigation hatası:', error)
+    }
+  }, [initialLocation, isLoading, highlights])
+
   const goToNext = () => {
     if (renditionRef.current) {
       renditionRef.current.next()
@@ -2233,6 +2278,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         }
         setBookmarks([...bookmarks, newBookmark])
         setIsBookmarked(true)
+
+        // PostHog: Track bookmark created
+        trackEvent({
+          event: 'risaleinurai_bookmark_created',
+          properties: {
+            book_id: bookId
+          }
+        })
       }
     } catch (error) {
       console.error('Bookmark ekleme hatası:', error)
@@ -2685,35 +2738,64 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   }
 
   // Tam ekran değişikliklerini dinle ve inset/padding'i güncelle
+  // Tam ekran değişikliklerini dinle ve inset/padding'i güncelle
   useEffect(() => {
-    // iOS'ta UI animasyonlarının ve layout'un oturması için süreyi artırdık
-    const id = window.setTimeout(() => {
+    const wasFullscreen = prevIsFullscreenRef.current
+    prevIsFullscreenRef.current = isFullscreen
+
+    // Sadece Fullscreen'den çıkış yapıldığında çalışsın (initial mount'da çalışmasın)
+    if (wasFullscreen && !isFullscreen) {
+      // iOS cihazlarda tam ekrandan çıkışta beyaz sayfa hatasına karşı kesin çözüm:
+      // Sayfayı tamamen yenile.
+      const isIOS =
+        typeof navigator !== 'undefined' &&
+        (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
+      if (isIOS) {
+        window.location.reload()
+        return
+      }
+
       applyReaderInsets()
-      // Paginated layout'ta padding/viewport değişince yeniden ölçmek gerekebiliyor
-      try {
-        const rendition = renditionRef.current
-        if (rendition?.resize) {
-          rendition.resize()
-        }
+      const id = window.setTimeout(() => {
+        try {
+          const rendition = renditionRef.current
+          if (rendition) {
+            // Paginated layout'ta padding/viewport değişince yeniden ölçmek gerekebiliyor
+            if (rendition.resize) {
+              rendition.resize()
+            }
 
-        // Özellikle iOS'ta fullscreen'den çıkarken bazen sayfa boş görünebiliyor.
-        // Mevcut konumu yeniden display ederek sayfayı zorla yeniden çiziyoruz.
-        if (!isFullscreen && rendition) {
-          const currentLoc =
-            preExitLocationRef.current ||
-            (rendition.location &&
-              (rendition.location.start?.cfi || (rendition.location as any).cfi)) ||
-            lastLocationRef.current
+            const currentLoc =
+              preExitLocationRef.current ||
+              (rendition.location &&
+                (rendition.location.start?.cfi || (rendition.location as any).cfi)) ||
+              lastLocationRef.current
 
-          if (currentLoc) {
-            console.log('Fullscreen çıkışı sonrası konum restore ediliyor:', currentLoc)
-            rendition.display(currentLoc)
-            preExitLocationRef.current = null
+            if (currentLoc) {
+              console.log('Fullscreen çıkışı sonrası konum restore ediliyor:', currentLoc)
+              rendition.display(currentLoc)
+              preExitLocationRef.current = null
+            }
           }
-        }
-      } catch { }
-    }, 300)
-    return () => window.clearTimeout(id)
+        } catch { }
+      }, 300)
+      return () => window.clearTimeout(id)
+    } else if (isFullscreen) {
+      // Fullscreen'e giriş yapıldığında
+      // iOS'ta UI animasyonlarının ve layout'un oturması için süreyi artırdık
+      const id = window.setTimeout(() => {
+        applyReaderInsets()
+        try {
+          const rendition = renditionRef.current
+          if (rendition?.resize) {
+            rendition.resize()
+          }
+        } catch { }
+      }, 300)
+      return () => window.clearTimeout(id)
+    }
   }, [isFullscreen, applyReaderInsets])
 
   // Window resize olayını dinle ve inset/padding + layout'u güncelle
@@ -2768,9 +2850,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
   const epubInitOptions = useMemo(() => ({
     openAs: 'epub',
-    flow: scrollMode ? 'scrolled-doc' : 'paginated',
-    manager: scrollMode ? 'continuous' : 'default',
-    spread: 'none'
+    flow: scrollMode ? 'scrolled' : 'paginated',
+    manager: 'default',
+    spread: 'none',
+    width: '100%',
+    height: '100%',
+
+    allowScriptedContent: true,
   }), [scrollMode])
 
   // iOS için ek text selection handling (polling tabanlı, native menü devre dışıyken daha stabil)
@@ -3148,6 +3234,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       </div>
     )
   }
+
 
   return (
     <div className={`reader-viewport overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${iosSafeAreaClass} ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
@@ -3712,6 +3799,22 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                       if (newScrollMode !== scrollMode) {
                         setScrollMode(newScrollMode)
                         localStorage.setItem(`scrollMode_${bookId}`, String(newScrollMode))
+
+                        // Mobilde kaydırma modundan sayfalama moduna geçişte boş sayfa sorununu çözmek için
+                        // sayfayı yeniden yüklüyoruz.
+                        if (!newScrollMode) {
+                          const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                          if (isMobile) {
+                            // Son konumu güvenceye al
+                            if (userId && bookId) {
+                              saveReadingProgress(userId, bookId, String(location), progressPercentage).catch(() => { })
+                            }
+                            // Kısa bir gecikmeyle yeniden yükle
+                            setTimeout(() => {
+                              window.location.reload()
+                            }, 100)
+                          }
+                        }
                       }
                     }}
                     className={`flex-1 py-3 px-4 rounded-xl border transition-all duration-200 ${(mode.id === 'scroll' ? scrollMode : !scrollMode)
