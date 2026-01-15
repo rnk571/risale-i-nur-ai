@@ -8,9 +8,10 @@ interface AuthProps {
   onAuthSuccess: () => void
   isDarkMode?: boolean
   toggleDarkMode?: () => void
+  onPrivacyClick?: () => void
 }
 
-export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
+export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, onPrivacyClick }) => {
   const { t } = useTranslation()
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState('')
@@ -245,6 +246,19 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                 <div className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-600 dark:bg-blue-400 transition-all duration-200 group-hover:w-full"></div>
               </button>
             </div>
+
+            {/* Privacy Policy Link */}
+            {onPrivacyClick && (
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={onPrivacyClick}
+                  className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200"
+                >
+                  {t('app.privacyPolicy')}
+                </button>
+              </div>
+            )}
           </form>
         </div>
 

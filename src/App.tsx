@@ -11,11 +11,12 @@ import { AdminPanel } from './components/AdminPanel'
 import { Profile } from './components/Profile'
 import { Annotations } from './components/Annotations'
 import { AudioBookPage } from './components/AudioBookPage'
+import { PrivacyPolicy } from './components/PrivacyPolicy'
 
 import { useDarkMode } from './hooks/useDarkMode'
 import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon, Bookmark, Headphones } from 'lucide-react'
 
-type ViewMode = 'auth' | 'library' | 'reader' | 'audio' | 'admin' | 'profile' | 'annotations'
+type ViewMode = 'auth' | 'library' | 'reader' | 'audio' | 'admin' | 'profile' | 'annotations' | 'privacy'
 
 interface User {
   id: string
@@ -29,9 +30,14 @@ function App() {
 
   // ViewMode'u localStorage'dan al veya varsayılan değer kullan
   const getInitialViewMode = (): ViewMode => {
+    // Check URL first
+    if (window.location.pathname === '/privacy') {
+      return 'privacy'
+    }
+
     try {
       const savedViewMode = localStorage.getItem('readigo_viewMode')
-      if (savedViewMode && ['auth', 'library', 'reader', 'audio', 'admin', 'profile', 'annotations'].includes(savedViewMode)) {
+      if (savedViewMode && ['auth', 'library', 'reader', 'audio', 'admin', 'profile', 'annotations', 'privacy'].includes(savedViewMode)) {
         return savedViewMode as ViewMode
       }
     } catch (error) {
@@ -73,14 +79,43 @@ function App() {
   const iosSafeAreaClass = isIOSDevice ? 'ios-safe-area' : ''
   const iosNavSafeAreaClass = isIOSDevice ? 'ios-nav-safe-area' : ''
 
-  // ViewMode değiştiğinde localStorage'a kaydet
+  // ViewMode değiştiğinde localStorage'a kaydet ve URL'i güncelle
   useEffect(() => {
     try {
       localStorage.setItem('readigo_viewMode', viewMode)
+
+      // Basic URL update
+      if (viewMode === 'privacy') {
+        if (window.location.pathname !== '/privacy') {
+          window.history.pushState(null, '', '/privacy')
+        }
+      } else {
+        if (window.location.pathname === '/privacy') {
+          window.history.pushState(null, '', '/')
+        }
+      }
     } catch (error) {
       console.warn('ViewMode localStorage yazma hatası:', error)
     }
   }, [viewMode])
+
+  // Browser navigation (Back/Forward) handling
+  useEffect(() => {
+    const handlePopState = () => {
+      if (window.location.pathname === '/privacy') {
+        setViewMode('privacy')
+      } else if (user) {
+        // If logged in and going back from privacy, default to library
+        setViewMode('library')
+      } else {
+        // If not logged in, default to auth
+        setViewMode('auth')
+      }
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [user])
 
   // SelectedBook değiştiğinde localStorage'a kaydet
   useEffect(() => {
@@ -112,8 +147,10 @@ function App() {
           await loadUserData(session, false) // viewMode'u değiştirmeyi devre dışı bırak
           setLoading(false)
         } else {
-          // Session yoksa auth'a yönlendir ve localStorage'ı temizle
-          setViewMode('auth')
+          // Session yoksa auth'a yönlendir (eğer privacy modunda değilsek)
+          if (window.location.pathname !== '/privacy') {
+            setViewMode('auth')
+          }
           setSelectedBook(null)
           localStorage.removeItem('readigo_viewMode')
           localStorage.removeItem('readigo_selectedBook')
@@ -206,6 +243,8 @@ function App() {
             // Notlar sayfasındayken aynı modda kal
             setViewMode('annotations')
             console.log('loadUserData - annotations mode restored')
+          } else if (savedViewMode === 'privacy') {
+            setViewMode('privacy')
           } else {
             setViewMode('library')
             console.log('loadUserData - library mode set')
@@ -229,12 +268,17 @@ function App() {
         return
       }
 
-      // Session yoksa hata
-      setViewMode('auth')
+      // Session yoksa hata (ama privacy modundaysak yönlendirme yapma)
+      if (window.location.pathname !== '/privacy') {
+        setViewMode('auth')
+      }
 
     } catch (error) {
       console.error('Kullanıcı verileri yüklenirken hata:', error)
-      setViewMode('auth')
+      console.error('Kullanıcı verileri yüklenirken hata:', error)
+      if (window.location.pathname !== '/privacy') {
+        setViewMode('auth')
+      }
     } finally {
       setLoading(false)
     }
@@ -505,6 +549,8 @@ function App() {
                             </button>
                           )}
 
+
+
                           <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
 
                           {/* Logout Button */}
@@ -532,7 +578,12 @@ function App() {
       {/* Main Content */}
       <main className="relative">
         {viewMode === 'auth' && (
-          <Auth onAuthSuccess={handleAuthSuccess} isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} />
+          <Auth
+            onAuthSuccess={handleAuthSuccess}
+            isDarkMode={isDarkMode}
+            toggleDarkMode={toggleDarkMode}
+            onPrivacyClick={() => setViewMode('privacy')}
+          />
         )}
         {viewMode === 'library' && (
           <>
@@ -691,6 +742,18 @@ function App() {
             onBackToLibrary={() => setViewMode('library')}
             onOpenBookmark={(bookId, location) => openBookAtLocation(bookId, location, false)}
             onOpenHighlight={(bookId, cfiRange) => openBookAtLocation(bookId, cfiRange, true)}
+          />
+        )}
+
+        {viewMode === 'privacy' && (
+          <PrivacyPolicy
+            onBack={() => {
+              if (user) {
+                setViewMode('library')
+              } else {
+                setViewMode('auth')
+              }
+            }}
           />
         )}
       </main>

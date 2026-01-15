@@ -11,7 +11,8 @@
     "toLibrary": "Back to Library",
     "adminPanel": "Admin Panel",
     "profile": "My Profile",
-    "annotations": "My Bookmarks & Highlights"
+    "annotations": "My Bookmarks & Highlights",
+    "privacyPolicy": "Privacy Policy"
   },
   "common": {
     "loading": "Loading...",
