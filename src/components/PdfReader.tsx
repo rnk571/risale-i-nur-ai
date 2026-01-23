@@ -16,8 +16,9 @@ interface PdfReaderProps {
   bookUrl: string
   bookTitle: string
   bookId: string
-  userId: string
+  userId?: string  // Optional for guest mode
   onBackToLibrary: () => void
+  onLoginRequired?: () => void  // Called when guest tries to use account features
   isDarkMode?: boolean
   toggleDarkMode?: () => void
   initialLocation?: string
@@ -29,6 +30,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
   bookId,
   userId,
   onBackToLibrary,
+  onLoginRequired,
   isDarkMode = false,
   toggleDarkMode,
   initialLocation
@@ -62,6 +64,11 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
   const { jumpToPage } = pageNavigationPluginInstance
   const thumbnailPluginInstance = thumbnailPlugin()
 
+  // iOS/Android Safe Area Detection (EpubReader ile tutarlı)
+  const isIOSDevice = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+  const iosSafeAreaClass = isIOSDevice ? 'ios-safe-area' : ''
+  const iosNavSafeAreaClass = isIOSDevice ? 'ios-nav-safe-area' : ''
+
   useEffect(() => {
     // Fullscreen geçişlerinde viewer'ı yeniden mount ederek stuck state'leri önle
     setViewerKey(Date.now())
@@ -88,8 +95,8 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
           }
         }
 
-        // Eğer dışarıdan konum verilmemişse, kayıtlı ilerlemeyi kullan
-        if (!startPage) {
+        // Eğer dışarıdan konum verilmemişse, kayıtlı ilerlemeyi kullan (only if logged in)
+        if (!startPage && userId) {
           const progress = await getReadingProgress(userId, bookId)
           if (progress && progress.current_location) {
             const match = progress.current_location.match(/page:(\d+)/)
@@ -105,10 +112,12 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
           setViewerKey(Date.now())
           savedPageRef.current = startPage
         }
-        // Bookmark'ları yükle
-        const userBookmarks = await getBookmarks(userId, bookId)
-        setBookmarks(userBookmarks || [])
-      } catch {}
+        // Bookmark'ları yükle (only if logged in)
+        if (userId) {
+          const userBookmarks = await getBookmarks(userId, bookId)
+          setBookmarks(userBookmarks || [])
+        }
+      } catch { }
       // Zoom seviyesini localStorage'dan yükle
       try {
         const savedZoom = localStorage.getItem(`pdf:zoom:${userId}:${bookId}`)
@@ -116,7 +125,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
           const val = parseFloat(savedZoom)
           if (!Number.isNaN(val) && val > 0) setDefaultZoom(val)
         }
-      } catch {}
+      } catch { }
       setLoading(false)
     }
     init()
@@ -129,6 +138,11 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
   }, [currentPage, bookmarks])
 
   const toggleBookmark = async () => {
+    if (!userId) {
+      // Guest mode - show login prompt
+      onLoginRequired?.()
+      return
+    }
     const loc = `page:${currentPage}`
     try {
       if (isBookmarked) {
@@ -143,7 +157,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
         setPendingBookmarkLocation(loc)
         setShowBookmarkNoteModal(true)
       }
-    } catch {}
+    } catch { }
   }
 
   const handleAddBookmarkWithNote = async (note: string) => {
@@ -152,7 +166,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
     try {
       const percentage = numPages > 0 ? Math.round((currentPage / numPages) * 100) : 0
       let bookmarkNote = note.trim()
-      
+
       // Eğer not boşsa, sadece sayfa bilgisini ekle
       if (!bookmarkNote) {
         bookmarkNote = `${t('reader.pageShort')} ${currentPage}/${numPages || 0} (%${percentage})`
@@ -160,7 +174,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
         // Not varsa, not üstte, sayfa bilgisi altta olacak şekilde düzenle
         bookmarkNote = `${bookmarkNote}\n${t('reader.pageShort')} ${currentPage}/${numPages || 0} (%${percentage})`
       }
-      
+
       const id = await addBookmark(userId, bookId, pendingBookmarkLocation, bookmarkNote, '')
       if (id) {
         const newBm: BookmarkType = {
@@ -211,7 +225,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
       // Scroll modunu uyguladıktan kısa süre sonra sayfayı geri getir
       const t2 = window.setTimeout(() => {
         if (resumePageRef.current && resumePageRef.current > 0) {
-          try { jumpToPage(Math.max(0, resumePageRef.current - 1)) } catch {}
+          try { jumpToPage(Math.max(0, resumePageRef.current - 1)) } catch { }
         }
       }, 80)
       return () => window.clearTimeout(t2)
@@ -231,7 +245,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
     const pageIndex = e.currentPage + 1
     setCurrentPage(pageIndex)
     resumePageRef.current = pageIndex
-    if (numPages > 0) {
+    if (numPages > 0 && userId) {  // Only save progress if logged in
       const percentage = Math.round((pageIndex / numPages) * 100)
       void saveReadingProgress(userId, bookId, `page:${pageIndex}`, percentage)
     }
@@ -239,8 +253,8 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
 
   if (loading) {
     return (
-      <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
-        <div className="bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0">
+      <div className={`reader-viewport overflow-hidden flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ${iosSafeAreaClass}`}>
+        <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ${iosNavSafeAreaClass}`}>
           <div className="max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -269,7 +283,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
 
   if (error) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center text-red-600 dark:text-red-400">
+      <div className={`reader-viewport overflow-hidden flex flex-col items-center justify-center text-red-600 dark:text-red-400 ${iosSafeAreaClass}`}>
         <p>{error}</p>
       </div>
     )
@@ -279,9 +293,9 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
 
   // Tam ekran modunda üst/bottom bar gizli; çıkmak için bir mini buton ekleyelim (mobilde)
   return (
-    <div className={`h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''}`}>
+    <div className={`reader-viewport overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${iosSafeAreaClass} ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''}`}>
       {/* Modern Header */}
-      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ${isFullscreen ? 'hidden' : ''}`}>
+      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ${iosNavSafeAreaClass} ${isFullscreen ? 'hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -316,11 +330,10 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
             {/* Quick Bookmark */}
             <button
               onClick={toggleBookmark}
-              className={`p-1.5 rounded-lg backdrop-blur-sm border shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center ${
-                isBookmarked 
-                  ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400' 
-                  : 'bg-white dark:bg-dark-800/80 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400'
-              }`}
+              className={`p-1.5 rounded-lg backdrop-blur-sm border shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center ${isBookmarked
+                ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
+                : 'bg-white dark:bg-dark-800/80 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400'
+                }`}
               title={isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
               aria-label={isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
             >
@@ -496,7 +509,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
                       className="p-2 bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 rounded-lg hover:bg-white/80 dark:hover:bg-dark-700/80"
                     >
                       <div className="flex items-start justify-between">
-                        <div 
+                        <div
                           className="flex-1 cursor-pointer"
                           onClick={() => { jumpToPage(Math.max(0, page - 1)); setShowBookmarks(false) }}
                         >
@@ -597,17 +610,17 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
                         const target = Math.max(0, savedPageRef.current - 1)
                         try {
                           jumpToPage(target)
-                        } catch {}
+                        } catch { }
                       }
                       // Yüklemede seçili scroll modunu uygula
-                      try { applyScrollMode(selectedScrollMode) } catch {}
-                       // Yüklemede mevcut sayfa (eğer varsa) geri getir
-                       try {
-                         const page = (resumePageRef.current && resumePageRef.current > 0)
-                           ? Math.max(0, resumePageRef.current - 1)
-                           : Math.max(0, currentPage - 1)
-                         jumpToPage(page)
-                       } catch {}
+                      try { applyScrollMode(selectedScrollMode) } catch { }
+                      // Yüklemede mevcut sayfa (eğer varsa) geri getir
+                      try {
+                        const page = (resumePageRef.current && resumePageRef.current > 0)
+                          ? Math.max(0, resumePageRef.current - 1)
+                          : Math.max(0, currentPage - 1)
+                        jumpToPage(page)
+                      } catch { }
                     }}
                     onZoom={(e) => {
                       try {
@@ -616,7 +629,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
                           setDefaultZoom(scale)
                           localStorage.setItem(`pdf:zoom:${userId}:${bookId}`, String(scale))
                         }
-                      } catch {}
+                      } catch { }
                     }}
                     onPageChange={handlePageChange}
                     initialPage={Math.max(0, currentPage - 1)}
@@ -640,7 +653,7 @@ export const PdfReader: React.FC<PdfReaderProps> = ({
       </div>
 
       {/* Bottom Status Bar */}
-      <div className={`hidden md:block bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border-t border-white/30 dark:border-dark-700/30 ${isFullscreen ? 'hidden' : ''}` }>
+      <div className={`hidden md:block bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border-t border-white/30 dark:border-dark-700/30 ${isFullscreen ? 'hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 py-1.5">
           <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
             <span className="truncate max-w-48">{bookTitle}</span>

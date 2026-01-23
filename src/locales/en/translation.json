@@ -45,7 +45,15 @@
     "signUp": "Create Account",
     "signingUp": "Registering...",
     "toggleToSignUp": "Don't have an account? Create one",
-    "toggleToSignIn": "Already have an account? Sign in"
+    "toggleToSignIn": "Already have an account? Sign in",
+    "continueAsGuest": "Continue as Guest",
+    "guestMode": "Guest Mode"
+  },
+  "guest": {
+    "banner": "Sign in for full experience",
+    "loginPrompt": "Create an account to save bookmarks and notes",
+    "featureRequiresLogin": "This feature requires you to sign in",
+    "login": "Sign In"
   },
   "library": {
     "title": "Book Library",

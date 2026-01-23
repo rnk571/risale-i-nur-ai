@@ -45,7 +45,15 @@
     "signUp": "Hesap Oluştur",
     "signingUp": "Kayıt olunuyor...",
     "toggleToSignUp": "Hesabınız yok mu? Hesap oluşturun",
-    "toggleToSignIn": "Zaten hesabınız var mı? Giriş yapın"
+    "toggleToSignIn": "Zaten hesabınız var mı? Giriş yapın",
+    "continueAsGuest": "Giriş Yapmadan Devam Et",
+    "guestMode": "Misafir Modu"
+  },
+  "guest": {
+    "banner": "Tam deneyim için giriş yapın",
+    "loginPrompt": "Yer işaretleri ve notlarınızı kaydetmek için hesap oluşturun",
+    "featureRequiresLogin": "Bu özellik giriş yapmanızı gerektiriyor",
+    "login": "Giriş Yap"
   },
   "library": {
     "title": "Kitap Kütüphanesi",

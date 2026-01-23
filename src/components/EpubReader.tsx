@@ -13,8 +13,9 @@ interface EpubReaderProps {
   bookUrl: string
   bookTitle: string
   bookId: string
-  userId: string
+  userId?: string  // Optional for guest mode
   onBackToLibrary: () => void
+  onLoginRequired?: () => void  // Called when guest tries to use account features
   isDarkMode?: boolean
   toggleDarkMode?: () => void
   initialLocation?: string
@@ -57,6 +58,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   bookId,
   userId,
   onBackToLibrary,
+  onLoginRequired,
   isDarkMode = false,
   toggleDarkMode,
   initialLocation,
@@ -1481,7 +1483,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
   // Highlight fonksiyonları
   const handleSaveHighlight = async (color: string, note: string) => {
-    if (!pendingHighlight || !userId || !bookId) return
+    if (!pendingHighlight || !userId || !bookId) {
+      // Guest mode - show login prompt
+      if (!userId) onLoginRequired?.()
+      return
+    }
 
     try {
       const highlightId = await addHighlight(
@@ -2197,8 +2203,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   }
 
   const toggleBookmark = async () => {
-    if (!userId || !bookId) return
-
+    if (!userId || !bookId) {
+      // Guest mode - show login prompt
+      onLoginRequired?.()
+      return
+    }
     try {
       if (isBookmarked) {
         // Mevcut bookmark'ı sil

@@ -9,9 +9,10 @@ interface AuthProps {
   isDarkMode?: boolean
   toggleDarkMode?: () => void
   onPrivacyClick?: () => void
+  onGuestAccess?: () => void
 }
 
-export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, onPrivacyClick }) => {
+export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, onPrivacyClick, onGuestAccess }) => {
   const { t } = useTranslation()
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState('')
@@ -230,8 +231,19 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, onPrivacyClick }) => 
               )}
             </button>
 
+            {/* Continue as Guest Button - right below login */}
+            {onGuestAccess && (
+              <button
+                type="button"
+                onClick={onGuestAccess}
+                className="w-full py-3 px-6 text-gray-600 dark:text-gray-400 font-medium hover:text-blue-600 dark:hover:text-blue-400 transition-colors duration-200"
+              >
+                {t('auth.continueAsGuest')}
+              </button>
+            )}
+
             {/* Toggle Link */}
-            <div className="text-center pt-4">
+            <div className="text-center pt-4 border-t border-gray-200 dark:border-dark-700 mt-2">
               <button
                 type="button"
                 onClick={() => {

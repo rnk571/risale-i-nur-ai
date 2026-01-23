@@ -12,6 +12,7 @@ import { Profile } from './components/Profile'
 import { Annotations } from './components/Annotations'
 import { AudioBookPage } from './components/AudioBookPage'
 import { PrivacyPolicy } from './components/PrivacyPolicy'
+import { LoginPromptModal } from './components/LoginPromptModal'
 
 import { useDarkMode } from './hooks/useDarkMode'
 import { BookOpen, Settings, LogOut, Moon, Sun, Menu, User as UserIcon, Bookmark, Headphones } from 'lucide-react'
@@ -69,6 +70,15 @@ function App() {
   const [showUserMenu, setShowUserMenu] = useState(false)
   const { isDarkMode, toggleDarkMode } = useDarkMode()
   const [bookOpenChoice, setBookOpenChoice] = useState<Book | null>(null)
+  const [isGuestMode, setIsGuestMode] = useState(() => {
+    // Restore guest mode from localStorage (for page reload persistence)
+    try {
+      return localStorage.getItem('readigo_guestMode') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false)
 
   // iOS cihaz tespiti (safe area sınıflarını sadece iOS'ta uygulamak için)
   const isIOSDevice =
@@ -147,13 +157,33 @@ function App() {
           await loadUserData(session, false) // viewMode'u değiştirmeyi devre dışı bırak
           setLoading(false)
         } else {
-          // Session yoksa auth'a yönlendir (eğer privacy modunda değilsek)
-          if (window.location.pathname !== '/privacy') {
+          // Session yoksa - guest mode veya auth'a yönlendir
+          const savedGuestMode = localStorage.getItem('readigo_guestMode') === 'true'
+          const savedViewMode = localStorage.getItem('readigo_viewMode')
+
+          if (savedGuestMode && savedViewMode && savedViewMode !== 'auth') {
+            // Guest modundayız, viewMode'u koru
+            setIsGuestMode(true)
+            setViewMode(savedViewMode as ViewMode)
+
+            // Eğer reader modundaysak, selectedBook'u da geri yükle
+            if (savedViewMode === 'reader') {
+              const savedBook = localStorage.getItem('readigo_selectedBook')
+              if (savedBook) {
+                try {
+                  setSelectedBook(JSON.parse(savedBook))
+                } catch {
+                  setSelectedBook(null)
+                }
+              }
+            }
+          } else if (window.location.pathname !== '/privacy') {
             setViewMode('auth')
+            setSelectedBook(null)
+            localStorage.removeItem('readigo_viewMode')
+            localStorage.removeItem('readigo_selectedBook')
+            localStorage.removeItem('readigo_guestMode')
           }
-          setSelectedBook(null)
-          localStorage.removeItem('readigo_viewMode')
-          localStorage.removeItem('readigo_selectedBook')
           setLoading(false)
         }
       } catch (error) {
@@ -351,15 +381,39 @@ function App() {
     }
   }
 
+  const handleGuestAccess = () => {
+    setIsGuestMode(true)
+    localStorage.setItem('readigo_guestMode', 'true')
+    setViewMode('library')
+    trackEvent({
+      event: 'risaleinurai_guest_access',
+      properties: {
+        source: 'auth_page'
+      }
+    })
+  }
+
   const handleLogout = async () => {
     // PostHog: Track logout
     trackEvent({
       event: 'risaleinurai_user_logged_out',
       properties: {
-        source: 'user_menu'
+        source: 'user_menu',
+        was_guest: isGuestMode
       }
     })
-    await supabase.auth.signOut()
+
+    if (isGuestMode) {
+      // Exit guest mode
+      setIsGuestMode(false)
+      setViewMode('auth')
+      setSelectedBook(null)
+      localStorage.removeItem('readigo_viewMode')
+      localStorage.removeItem('readigo_selectedBook')
+      localStorage.removeItem('readigo_guestMode')
+    } else {
+      await supabase.auth.signOut()
+    }
   }
 
   // Menü dışına tıklandığında menüyü kapat
@@ -569,6 +623,24 @@ function App() {
                     )}
                   </div>
                 )}
+
+                {/* Guest Mode Header */}
+                {isGuestMode && !user && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
+                      {t('auth.guestMode')}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setIsGuestMode(false)
+                        setViewMode('auth')
+                      }}
+                      className="px-3 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200"
+                    >
+                      {t('guest.login')}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -583,6 +655,7 @@ function App() {
             isDarkMode={isDarkMode}
             toggleDarkMode={toggleDarkMode}
             onPrivacyClick={() => setViewMode('privacy')}
+            onGuestAccess={handleGuestAccess}
           />
         )}
         {viewMode === 'library' && (
@@ -690,8 +763,9 @@ function App() {
               bookUrl={selectedBook.epub_file_path}
               bookTitle={selectedBook.title}
               bookId={selectedBook.id}
-              userId={user!.id}
+              userId={user?.id}
               onBackToLibrary={handleBackToLibrary}
+              onLoginRequired={() => setShowLoginPrompt(true)}
               isDarkMode={isDarkMode}
               toggleDarkMode={toggleDarkMode}
               initialLocation={initialReaderLocation || undefined}
@@ -701,8 +775,9 @@ function App() {
               bookUrl={selectedBook.epub_file_path}
               bookTitle={selectedBook.title}
               bookId={selectedBook.id}
-              userId={user!.id}
+              userId={user?.id}
               onBackToLibrary={handleBackToLibrary}
+              onLoginRequired={() => setShowLoginPrompt(true)}
               isDarkMode={isDarkMode}
               toggleDarkMode={toggleDarkMode}
               initialLocation={initialReaderLocation || undefined}
@@ -710,10 +785,10 @@ function App() {
             />
           )
         )}
-        {viewMode === 'audio' && selectedBook && user && (
+        {viewMode === 'audio' && selectedBook && (user || isGuestMode) && (
           <AudioBookPage
             book={selectedBook}
-            userId={user.id}
+            userId={user?.id}
             onBackToLibrary={handleBackToLibrary}
             isDarkMode={isDarkMode}
             toggleDarkMode={toggleDarkMode}
@@ -757,6 +832,17 @@ function App() {
           />
         )}
       </main>
+
+      {/* Login Prompt Modal for Guests */}
+      <LoginPromptModal
+        isOpen={showLoginPrompt}
+        onClose={() => setShowLoginPrompt(false)}
+        onLoginClick={() => {
+          setShowLoginPrompt(false)
+          setIsGuestMode(false)
+          setViewMode('auth')
+        }}
+      />
     </div>
   )
 }

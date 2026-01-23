@@ -12,7 +12,7 @@ import {
 
 interface AudioBookPageProps {
     book: Book
-    userId: string
+    userId?: string  // Optional for guest mode
     onBackToLibrary: () => void
     isDarkMode?: boolean
     toggleDarkMode?: () => void
