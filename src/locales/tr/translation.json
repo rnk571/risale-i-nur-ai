@@ -56,7 +56,8 @@
     "login": "Giriş Yap"
   },
   "library": {
-    "title": "Kitap Kütüphanesi",
+    "title": "Risale-i Nur Külliyatı",
+    "filterTitle": "Kitaplar",
     "subtitle": "Dijital kitap koleksiyonunuzu keşfedin. Yüzlerce kitap arasından seçiminizi yapın ve okuma yolculuğunuza başlayın.",
     "searchPlaceholder": "Kitap, yazar veya konu ara...",
     "loadError": "Kitaplar yüklenemedi. Lütfen tekrar deneyin.",

@@ -57,6 +57,7 @@
   },
   "library": {
     "title": "Book Library",
+    "filterTitle": "Books",
     "subtitle": "Discover your digital book collection. Choose from hundreds of books and start your reading journey.",
     "searchPlaceholder": "Search book, author or topic...",
     "loadError": "Failed to load books. Please try again.",

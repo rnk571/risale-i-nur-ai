@@ -62,7 +62,7 @@ export const BookFilters: React.FC<BookFiltersProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              {t('library.title')}
+              {t('library.filterTitle')}
             </h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">
               ({filteredCount} / {totalCount} {t('library.totalBooks').toLowerCase()})
