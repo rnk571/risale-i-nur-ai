@@ -83,7 +83,7 @@ export const BookFilters: React.FC<BookFiltersProps> = ({
                 placeholder={t('library.searchPlaceholder')}
                 value={searchTerm}
                 onChange={(e) => onSearchChange(e.target.value)}
-                className="w-full sm:w-80 pl-10 pr-10 py-3 bg-white/60 dark:bg-dark-700/60 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 shadow-lg hover:shadow-xl focus:shadow-xl"
+                className="w-full sm:w-80 pl-10 pr-10 py-3 bg-white/60 dark:bg-dark-700/60 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 shadow-lg hover:shadow-xl focus:shadow-xl"
               />
               {searchTerm && (
                 <button
