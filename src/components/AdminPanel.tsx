@@ -205,6 +205,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
           is_public: !!parsed.is_public,
           epub_file: null as File | null, // File objeleri serialize edilemez
           audio_files: [] as File[],
+          audio_file: null as File | null,
+          transcript_files: [] as File[],
           transcript_file: null as File | null,
           selectedUsers: Array.isArray(parsed.selectedUsers) ? parsed.selectedUsers : [],
           removeEpubFile: false,
@@ -225,6 +227,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       is_public: false,
       epub_file: null as File | null,
       audio_files: [] as File[],
+      audio_file: null as File | null,
+      transcript_files: [] as File[],
       transcript_file: null as File | null,
       selectedUsers: [] as string[],
       removeEpubFile: false,
@@ -248,8 +252,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
   const [formData, setFormData] = useState(getInitialFormData)
   const firstFieldRef = useRef<HTMLInputElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const audioFileInputRef = useRef<HTMLInputElement | null>(null)
-  const transcriptFileInputRef = useRef<HTMLInputElement | null>(null)
+  const audioFolderInputRef = useRef<HTMLInputElement | null>(null)
+  const audioZipInputRef = useRef<HTMLInputElement | null>(null)
+  const transcriptFolderInputRef = useRef<HTMLInputElement | null>(null)
+  const transcriptZipInputRef = useRef<HTMLInputElement | null>(null)
 
   // Filtre state'leri
   const [filters, setFilters] = useState<FilterState>(defaultFilters)
@@ -281,6 +287,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         ...formData,
         epub_file: null, // File objeleri serialize edilemez
         audio_files: [],
+        audio_file: null,
+        transcript_files: [],
         transcript_file: null
       }
       localStorage.setItem('admin_formData', JSON.stringify(dataToSave))
@@ -548,6 +556,133 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     return data.publicUrl
   }
 
+  const uploadAudioZip = async (file: File): Promise<string> => {
+    const fileExt = (file.name.split('.').pop() || '').toLowerCase()
+
+    const sanitizeFileName = (name: string): string => {
+      const charMap: Record<string, string> = {
+        'ı': 'i', 'İ': 'I', 'ğ': 'g', 'Ğ': 'G',
+        'ü': 'u', 'Ü': 'U', 'ş': 's', 'Ş': 'S',
+        'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C',
+        'â': 'a', 'Â': 'A', 'î': 'i', 'Î': 'I',
+        'û': 'u', 'Û': 'U', 'ê': 'e', 'Ê': 'E'
+      }
+
+      return name
+        .split('')
+        .map(char => charMap[char] || char)
+        .join('')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+    }
+
+    if (fileExt === 'zip') {
+      const zip = new JSZip()
+      const zipContent = await zip.loadAsync(file)
+
+      const audioExtensions = ['mp3', 'm4a', 'wav', 'ogg', 'aac', 'flac']
+      const audioFiles: { name: string; content: ArrayBuffer }[] = []
+
+      for (const [fileName, zipEntry] of Object.entries(zipContent.files)) {
+        if (!zipEntry.dir) {
+          const ext = (fileName.split('.').pop() || '').toLowerCase()
+          if (audioExtensions.includes(ext)) {
+            const content = await zipEntry.async('arraybuffer')
+            const baseName = fileName.split('/').pop() || fileName
+            audioFiles.push({ name: baseName, content })
+          }
+        }
+      }
+
+      if (audioFiles.length === 0) {
+        throw new Error('ZIP dosyasında ses dosyası bulunamadı')
+      }
+
+      audioFiles.sort((a, b) => extractChapterOrder(a.name) - extractChapterOrder(b.name))
+
+      const uploadedAudios: { fileName: string; audioUrl: string; order: number; title: string }[] = []
+      const baseId = Math.random().toString(36).substring(2)
+
+      for (let i = 0; i < audioFiles.length; i++) {
+        const audioFile = audioFiles[i]
+        const ext = (audioFile.name.split('.').pop() || 'mp3').toLowerCase()
+        const safeName = sanitizeFileName(audioFile.name)
+        const audioFileName = `${baseId}_${i.toString().padStart(2, '0')}_${safeName}`
+        const audioFilePath = `books/audio/chapters/${audioFileName}`
+
+        const audioBlob = new Blob([audioFile.content], {
+          type: ext === 'mp3' ? 'audio/mpeg' :
+            ext === 'm4a' ? 'audio/mp4' :
+              ext === 'wav' ? 'audio/wav' :
+                ext === 'ogg' ? 'audio/ogg' :
+                  ext === 'aac' ? 'audio/aac' :
+                    ext === 'flac' ? 'audio/flac' : 'audio/mpeg'
+        })
+
+        const { error } = await supabase.storage
+          .from('audio-files')
+          .upload(audioFilePath, audioBlob)
+
+        if (error) {
+          console.warn(`Audio yükleme hatası: ${audioFile.name}`, error)
+          continue
+        }
+
+        const { data } = supabase.storage
+          .from('audio-files')
+          .getPublicUrl(audioFilePath)
+
+        uploadedAudios.push({
+          fileName: audioFile.name,
+          audioUrl: data.publicUrl,
+          order: i + 1,
+          title: extractChapterTitle(audioFile.name)
+        })
+      }
+
+      if (uploadedAudios.length === 0) {
+        throw new Error('Hiçbir ses dosyası yüklenemedi')
+      }
+
+      const audioManifest = {
+        version: '1.0',
+        type: 'multi-chapter-audio',
+        chapters: uploadedAudios
+      }
+
+      const manifestBlob = new Blob([JSON.stringify(audioManifest, null, 2)], { type: 'application/json' })
+      const manifestFileName = `${baseId}_audio_manifest.json`
+      const manifestFilePath = `books/audio/${manifestFileName}`
+
+      const { error: manifestError } = await supabase.storage
+        .from('audio-files')
+        .upload(manifestFilePath, manifestBlob)
+
+      if (manifestError) throw manifestError
+
+      const { data: manifestData } = supabase.storage
+        .from('audio-files')
+        .getPublicUrl(manifestFilePath)
+
+      return manifestData.publicUrl
+    }
+
+    const safeExt = fileExt || 'mp3'
+    const fileName = `${Math.random().toString(36).substring(2)}.${safeExt}`
+    const filePath = `books/audio/${fileName}`
+
+    const { error } = await supabase.storage
+      .from('audio-files')
+      .upload(filePath, file)
+
+    if (error) throw error
+
+    const { data } = supabase.storage
+      .from('audio-files')
+      .getPublicUrl(filePath)
+
+    return data.publicUrl
+  }
+
   const uploadTranscriptFile = async (file: File): Promise<string> => {
     const fileExt = (file.name.split('.').pop() || '').toLowerCase()
 
@@ -673,6 +808,79 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     return data.publicUrl
   }
 
+  const uploadTranscriptFiles = async (files: File[]): Promise<string> => {
+    const sanitizeFileName = (name: string): string => {
+      const charMap: Record<string, string> = {
+        'ı': 'i', 'İ': 'I', 'ğ': 'g', 'Ğ': 'G',
+        'ü': 'u', 'Ü': 'U', 'ş': 's', 'Ş': 'S',
+        'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C',
+        'â': 'a', 'Â': 'A', 'î': 'i', 'Î': 'I',
+        'û': 'u', 'Û': 'U', 'ê': 'e', 'Ê': 'E'
+      }
+      return name.split('').map(char => charMap[char] || char).join('').replace(/[^a-zA-Z0-9._-]/g, '_')
+    }
+
+    const srtFiles = files.filter(f => f.name.toLowerCase().endsWith('.srt'))
+    if (srtFiles.length === 0) {
+      throw new Error('Seçilen klasörde SRT dosyası bulunamadı')
+    }
+
+    srtFiles.sort((a, b) => extractChapterOrder(a.name) - extractChapterOrder(b.name))
+
+    const uploadedChapters: { id: string; title: string; fileName: string; srtUrl: string; order: number }[] = []
+    const baseId = Math.random().toString(36).substring(2)
+
+    for (let i = 0; i < srtFiles.length; i++) {
+      const srtFile = srtFiles[i]
+      const safeName = sanitizeFileName(srtFile.name)
+      const srtFileName = `${baseId}_${i.toString().padStart(2, '0')}_${safeName}`
+      const srtFilePath = `books/transcripts/srt/${srtFileName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('transcript-files')
+        .upload(srtFilePath, srtFile)
+
+      if (uploadError) {
+        console.error(`SRT yükleme hatası: ${srtFile.name}`, uploadError)
+        continue
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('transcript-files')
+        .getPublicUrl(srtFilePath)
+
+      uploadedChapters.push({
+        id: `chapter_${i + 1}`,
+        title: extractChapterTitle(srtFile.name),
+        fileName: srtFile.name,
+        srtUrl: urlData.publicUrl,
+        order: i + 1
+      })
+    }
+
+    const manifest = {
+      version: '1.0',
+      audioUrl: '', // handleSubmit'te doldurulacak
+      chapters: uploadedChapters
+    }
+
+    const manifestFileName = `${baseId}_chapters.json`
+    const manifestFilePath = `books/transcripts/${manifestFileName}`
+    const manifestBlob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' })
+
+    const { error: manifestError } = await supabase.storage
+      .from('transcript-files')
+      .upload(manifestFilePath, manifestBlob)
+
+    if (manifestError) throw manifestError
+
+    const { data: manifestUrlData } = supabase.storage
+      .from('transcript-files')
+      .getPublicUrl(manifestFilePath)
+
+    return manifestUrlData.publicUrl
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.title || !formData.author) return
@@ -694,12 +902,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         audioUrl = null
       } else if (formData.audio_files && formData.audio_files.length > 0) {
         audioUrl = await uploadAudioFiles(formData.audio_files)
+      } else if (formData.audio_file) {
+        audioUrl = await uploadAudioZip(formData.audio_file)
       }
 
       // Transkript dosyası (opsiyonel)
       let transcriptUrl = editingBook?.audio_transcript_path || null
       if (formData.removeTranscriptFile) {
         transcriptUrl = null
+      } else if (formData.transcript_files && formData.transcript_files.length > 0) {
+        transcriptUrl = await uploadTranscriptFiles(formData.transcript_files)
       } else if (formData.transcript_file) {
         transcriptUrl = await uploadTranscriptFile(formData.transcript_file)
       }
@@ -775,6 +987,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         is_public: false,
         epub_file: null,
         audio_files: [],
+        audio_file: null,
+        transcript_files: [],
         transcript_file: null,
         selectedUsers: [],
         removeEpubFile: false,
@@ -844,6 +1058,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         is_public: !!book.is_public,
         epub_file: null,
         audio_files: [],
+        audio_file: null,
+        transcript_files: [],
         transcript_file: null,
         selectedUsers: selectedUserIds,
         removeEpubFile: false,
@@ -907,6 +1123,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                 is_public: false,
                 epub_file: null,
                 audio_files: [],
+                audio_file: null,
+                transcript_files: [],
                 transcript_file: null,
                 selectedUsers: [],
                 removeEpubFile: false,
@@ -1171,31 +1389,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                           </label>
                           <div className="relative">
                             <input
-                              ref={audioFileInputRef}
+                              ref={audioFolderInputRef}
                               type="file"
                               accept="audio/*"
                               {...{ webkitdirectory: "", directory: "" } as any}
                               multiple
                               onChange={(e) => {
                                 const files = Array.from(e.target.files || [])
-                                setFormData({ ...formData, audio_files: files, removeAudioFile: false })
+                                setFormData({ ...formData, audio_files: files, audio_file: null, removeAudioFile: false })
                               }}
-                              className="w-full opacity-0 absolute inset-0 cursor-pointer"
-                              aria-label={t('admin.form.audioFile')}
-                              title={t('admin.form.audioFile')}
+                              className="hidden"
                             />
-                            <div className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl text-gray-900 dark:text-gray-100 flex items-center justify-between pointer-events-none relative z-10">
-                              <span className="text-sm truncate">
+                            <input
+                              ref={audioZipInputRef}
+                              type="file"
+                              accept="audio/*,.zip"
+                              onChange={(e) => {
+                                setFormData({ ...formData, audio_file: e.target.files?.[0] || null, audio_files: [], removeAudioFile: false })
+                              }}
+                              className="hidden"
+                            />
+                            <div className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl text-gray-900 dark:text-gray-100 flex items-center justify-between relative z-10">
+                              <span className="text-sm truncate mr-4">
                                 {formData.audio_files && formData.audio_files.length > 0
-                                  ? `${formData.audio_files.length} ses dosyası seçildi (Klasör)`
-                                  : formData.removeAudioFile
-                                    ? t('admin.form.fileRemoved')
-                                    : editingBook?.audio_file_path
-                                      ? t('admin.form.audioFileExisting')
-                                      : t('admin.form.noFile')}
+                                  ? t('admin.form.audioFilesSelected', { count: formData.audio_files.length })
+                                  : formData.audio_file
+                                    ? formData.audio_file.name
+                                    : formData.removeAudioFile
+                                      ? t('admin.form.fileRemoved')
+                                      : editingBook?.audio_file_path
+                                        ? t('admin.form.audioFileExisting')
+                                        : t('admin.form.noFile')}
                               </span>
-                              <div className="flex items-center gap-2 pointer-events-auto">
-                                {editingBook?.audio_file_path && (!formData.audio_files || formData.audio_files.length === 0) && !formData.removeAudioFile && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                {editingBook?.audio_file_path && (!formData.audio_files || formData.audio_files.length === 0) && !formData.audio_file && !formData.removeAudioFile && (
                                   <>
                                     <button
                                       type="button"
@@ -1237,11 +1464,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    audioFileInputRef.current?.click()
+                                    audioFolderInputRef.current?.click()
+                                  }}
+                                  className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/70"
+                                >
+                                  {t('admin.form.chooseFolder')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    audioZipInputRef.current?.click()
                                   }}
                                   className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/70"
                                 >
-                                  {t('admin.form.chooseFile')}
+                                  {t('admin.form.chooseZip')}
                                 </button>
                               </div>
                             </div>
@@ -1258,26 +1495,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                           </label>
                           <div className="relative">
                             <input
-                              ref={transcriptFileInputRef}
+                              ref={transcriptFolderInputRef}
                               type="file"
-                              accept=".zip,.srt,.json,.txt,application/json,application/zip"
-                              onChange={(e) => setFormData({ ...formData, transcript_file: e.target.files?.[0] || null, removeTranscriptFile: false })}
-                              className="w-full opacity-0 absolute inset-0 cursor-pointer"
-                              aria-label={t('admin.form.transcriptFile')}
-                              title={t('admin.form.transcriptFile')}
+                              accept=".srt"
+                              {...{ webkitdirectory: "", directory: "" } as any}
+                              multiple
+                              onChange={(e) => {
+                                const files = Array.from(e.target.files || [])
+                                setFormData({ ...formData, transcript_files: files, transcript_file: null, removeTranscriptFile: false })
+                              }}
+                              className="hidden"
                             />
-                            <div className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl text-gray-900 dark:text-gray-100 flex items-center justify-between pointer-events-none relative z-10">
-                              <span className="text-sm truncate">
-                                {formData.transcript_file
-                                  ? formData.transcript_file.name
-                                  : formData.removeTranscriptFile
-                                    ? t('admin.form.fileRemoved')
-                                    : editingBook?.audio_transcript_path
-                                      ? t('admin.form.transcriptFileExisting')
-                                      : t('admin.form.noFile')}
+                            <input
+                              ref={transcriptZipInputRef}
+                              type="file"
+                              accept=".zip,.json,.txt,application/json,application/zip"
+                              onChange={(e) => {
+                                setFormData({ ...formData, transcript_file: e.target.files?.[0] || null, transcript_files: [], removeTranscriptFile: false })
+                              }}
+                              className="hidden"
+                            />
+                            <div className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl text-gray-900 dark:text-gray-100 flex items-center justify-between relative z-10">
+                              <span className="text-sm truncate mr-4">
+                                {formData.transcript_files && formData.transcript_files.length > 0
+                                  ? t('admin.form.transcriptFilesSelected', { count: formData.transcript_files.length })
+                                  : formData.transcript_file
+                                    ? formData.transcript_file.name
+                                    : formData.removeTranscriptFile
+                                      ? t('admin.form.fileRemoved')
+                                      : editingBook?.audio_transcript_path
+                                        ? t('admin.form.transcriptFileExisting')
+                                        : t('admin.form.noFile')}
                               </span>
-                              <div className="flex items-center gap-2 pointer-events-auto">
-                                {editingBook?.audio_transcript_path && !formData.transcript_file && !formData.removeTranscriptFile && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                {editingBook?.audio_transcript_path && (!formData.transcript_files || formData.transcript_files.length === 0) && !formData.transcript_file && !formData.removeTranscriptFile && (
                                   <>
                                     <button
                                       type="button"
@@ -1319,11 +1570,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    transcriptFileInputRef.current?.click()
+                                    transcriptFolderInputRef.current?.click()
+                                  }}
+                                  className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/70"
+                                >
+                                  {t('admin.form.chooseFolder')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    transcriptZipInputRef.current?.click()
                                   }}
                                   className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/70"
                                 >
-                                  {t('admin.form.chooseFile')}
+                                  {t('admin.form.chooseZipOrFile')}
                                 </button>
                               </div>
                             </div>
@@ -1404,6 +1665,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                           is_public: false,
                           epub_file: null,
                           audio_files: [],
+                          audio_file: null,
+                          transcript_files: [],
                           transcript_file: null,
                           selectedUsers: [],
                           removeEpubFile: false,
