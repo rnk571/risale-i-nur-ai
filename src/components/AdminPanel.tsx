@@ -204,7 +204,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
           book_size: (parsed.book_size === 'large' ? 'large' : 'small') as 'small' | 'large',
           is_public: !!parsed.is_public,
           epub_file: null as File | null, // File objeleri serialize edilemez
-          audio_file: null as File | null,
+          audio_files: [] as File[],
           transcript_file: null as File | null,
           selectedUsers: Array.isArray(parsed.selectedUsers) ? parsed.selectedUsers : [],
           removeEpubFile: false,
@@ -224,7 +224,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       book_size: 'small' as 'small' | 'large',
       is_public: false,
       epub_file: null as File | null,
-      audio_file: null as File | null,
+      audio_files: [] as File[],
       transcript_file: null as File | null,
       selectedUsers: [] as string[],
       removeEpubFile: false,
@@ -280,7 +280,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       const dataToSave = {
         ...formData,
         epub_file: null, // File objeleri serialize edilemez
-        audio_file: null,
+        audio_files: [],
         transcript_file: null
       }
       localStorage.setItem('admin_formData', JSON.stringify(dataToSave))
@@ -427,9 +427,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     return { url: data.publicUrl, type: isPdf ? 'pdf' : 'epub' }
   }
 
-  const uploadAudioFile = async (file: File): Promise<string> => {
-    const fileExt = (file.name.split('.').pop() || '').toLowerCase()
-
+  const uploadAudioFiles = async (files: File[]): Promise<string> => {
     // Türkçe ve özel karakterleri ASCII-safe hale getir
     const sanitizeFileName = (name: string): string => {
       const charMap: Record<string, string> = {
@@ -447,28 +445,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         .replace(/[^a-zA-Z0-9._-]/g, '_')
     }
 
-    // ZIP dosyası ise: içindeki audio dosyalarını çıkar ve manifest oluştur
-    if (fileExt === 'zip') {
-      const zip = new JSZip()
-      const zipContent = await zip.loadAsync(file)
-
-      // Audio dosyalarını bul (mp3, m4a, wav, ogg, aac)
+    // Birden çok dosya varsa: manifest oluştur
+    if (files.length > 1) {
+      // Audio dosyalarını bul (mp3, m4a, wav, ogg, aac, flac)
       const audioExtensions = ['mp3', 'm4a', 'wav', 'ogg', 'aac', 'flac']
-      const audioFiles: { name: string; content: ArrayBuffer }[] = []
-
-      for (const [fileName, zipEntry] of Object.entries(zipContent.files)) {
-        if (!zipEntry.dir) {
-          const ext = (fileName.split('.').pop() || '').toLowerCase()
-          if (audioExtensions.includes(ext)) {
-            const content = await zipEntry.async('arraybuffer')
-            const baseName = fileName.split('/').pop() || fileName
-            audioFiles.push({ name: baseName, content })
-          }
-        }
-      }
+      const audioFiles = files.filter(file => {
+        const ext = (file.name.split('.').pop() || '').toLowerCase()
+        return audioExtensions.includes(ext)
+      })
 
       if (audioFiles.length === 0) {
-        throw new Error('ZIP dosyasında ses dosyası bulunamadı')
+        throw new Error('Seçilen klasörde/dosyalarda geçerli bir ses dosyası bulunamadı')
       }
 
       // Sırala (dosya adına göre)
@@ -484,23 +471,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
 
       for (let i = 0; i < audioFiles.length; i++) {
         const audioFile = audioFiles[i]
-        const ext = (audioFile.name.split('.').pop() || 'mp3').toLowerCase()
         const safeName = sanitizeFileName(audioFile.name)
         const audioFileName = `${baseId}_${i.toString().padStart(2, '0')}_${safeName}`
         const audioFilePath = `books/audio/chapters/${audioFileName}`
 
-        const audioBlob = new Blob([audioFile.content], {
-          type: ext === 'mp3' ? 'audio/mpeg' :
-            ext === 'm4a' ? 'audio/mp4' :
-              ext === 'wav' ? 'audio/wav' :
-                ext === 'ogg' ? 'audio/ogg' :
-                  ext === 'aac' ? 'audio/aac' :
-                    ext === 'flac' ? 'audio/flac' : 'audio/mpeg'
-        })
-
         const { error } = await supabase.storage
           .from('audio-files')
-          .upload(audioFilePath, audioBlob)
+          .upload(audioFilePath, audioFile)
 
         if (error) {
           console.warn(`Audio yükleme hatası: ${audioFile.name}`, error)
@@ -550,6 +527,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
     }
 
     // Tek dosya ise normal yükle
+    const file = files[0]
+    const fileExt = (file.name.split('.').pop() || 'mp3').toLowerCase()
     const safeExt = fileExt || 'mp3'
     const fileName = `${Math.random().toString(36).substring(2)}.${safeExt}`
     const filePath = `books/audio/${fileName}`
@@ -713,8 +692,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
       let audioUrl = editingBook?.audio_file_path || null
       if (formData.removeAudioFile) {
         audioUrl = null
-      } else if (formData.audio_file) {
-        audioUrl = await uploadAudioFile(formData.audio_file)
+      } else if (formData.audio_files && formData.audio_files.length > 0) {
+        audioUrl = await uploadAudioFiles(formData.audio_files)
       }
 
       // Transkript dosyası (opsiyonel)
@@ -795,7 +774,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         book_size: 'small',
         is_public: false,
         epub_file: null,
-        audio_file: null,
+        audio_files: [],
         transcript_file: null,
         selectedUsers: [],
         removeEpubFile: false,
@@ -864,7 +843,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
         book_size: (book.book_size as 'small' | 'large') || 'small',
         is_public: !!book.is_public,
         epub_file: null,
-        audio_file: null,
+        audio_files: [],
         transcript_file: null,
         selectedUsers: selectedUserIds,
         removeEpubFile: false,
@@ -927,7 +906,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                 book_size: 'small',
                 is_public: false,
                 epub_file: null,
-                audio_file: null,
+                audio_files: [],
                 transcript_file: null,
                 selectedUsers: [],
                 removeEpubFile: false,
@@ -1194,16 +1173,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                             <input
                               ref={audioFileInputRef}
                               type="file"
-                              accept="audio/*,.zip"
-                              onChange={(e) => setFormData({ ...formData, audio_file: e.target.files?.[0] || null, removeAudioFile: false })}
+                              accept="audio/*"
+                              {...{ webkitdirectory: "", directory: "" } as any}
+                              multiple
+                              onChange={(e) => {
+                                const files = Array.from(e.target.files || [])
+                                setFormData({ ...formData, audio_files: files, removeAudioFile: false })
+                              }}
                               className="w-full opacity-0 absolute inset-0 cursor-pointer"
                               aria-label={t('admin.form.audioFile')}
                               title={t('admin.form.audioFile')}
                             />
                             <div className="w-full px-4 py-3 bg-white/60 dark:bg-dark-700/60 border border-gray-300 dark:border-dark-600/30 rounded-xl text-gray-900 dark:text-gray-100 flex items-center justify-between pointer-events-none relative z-10">
                               <span className="text-sm truncate">
-                                {formData.audio_file
-                                  ? formData.audio_file.name
+                                {formData.audio_files && formData.audio_files.length > 0
+                                  ? `${formData.audio_files.length} ses dosyası seçildi (Klasör)`
                                   : formData.removeAudioFile
                                     ? t('admin.form.fileRemoved')
                                     : editingBook?.audio_file_path
@@ -1211,7 +1195,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                                       : t('admin.form.noFile')}
                               </span>
                               <div className="flex items-center gap-2 pointer-events-auto">
-                                {editingBook?.audio_file_path && !formData.audio_file && !formData.removeAudioFile && (
+                                {editingBook?.audio_file_path && (!formData.audio_files || formData.audio_files.length === 0) && !formData.removeAudioFile && (
                                   <>
                                     <button
                                       type="button"
@@ -1419,7 +1403,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToLibrary }) => {
                           book_size: 'small',
                           is_public: false,
                           epub_file: null,
-                          audio_file: null,
+                          audio_files: [],
                           transcript_file: null,
                           selectedUsers: [],
                           removeEpubFile: false,
