@@ -41,7 +41,8 @@
     "react-dom": "^19.1.0",
     "react-i18next": "^15.0.2",
     "react-reader": "^2.0.13",
-    "react-router-dom": "^7.7.1"
+    "react-router-dom": "^7.7.1",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",

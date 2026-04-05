@@ -1,16 +1,30 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ReactReader, ReactReaderStyle } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info, Search, Clipboard, ScrollText, Palette, Type, LayoutList, Sparkles, Coffee, Contrast, Monitor } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Highlighter, CheckCircle2, XCircle, Info, Search } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType, addHighlight, getHighlights, updateHighlight, deleteHighlight, type Highlight } from '../lib/progressService'
 import { trackEvent } from '../lib/analytics'
 import { BookmarkNoteModal } from './BookmarkNoteModal'
 import { HighlightModal } from './HighlightModal'
 import { HighlightPanel } from './HighlightPanel'
-import { ContextMenu } from './ContextMenu'
+import { ReaderContextMenu } from './reader/ReaderContextMenu'
+import { ReaderBookmarkPanel } from './reader/ReaderBookmarkPanel'
+import { ReaderSearchPanel, type TextSearchResult } from './reader/ReaderSearchPanel'
+import { ReaderSettingsPanel } from './reader/ReaderSettingsPanel'
+import { useReaderStore } from '../stores/useReaderStore'
+import {
+  buildReaderThemeCss,
+  collectFontFaces,
+  getReaderFontDefAr,
+  getReaderFontDefTr,
+  resolveReaderSurface,
+  SYSTEM_FONT_STACK,
+  type ReaderAppearancePreset,
+  type ReaderSurfaceTheme,
+} from './reader/readerTheme'
 
-export type ReaderSurfaceTheme = 'light' | 'sepia' | 'dark' | 'oled'
-export type ReaderAppearancePreset = ReaderSurfaceTheme | 'system'
+export type { ReaderAppearancePreset, ReaderSurfaceTheme } from './reader/readerTheme'
+export { resolveReaderSurface } from './reader/readerTheme'
 
 interface EpubReaderProps {
   bookUrl: string
@@ -27,253 +41,19 @@ interface EpubReaderProps {
   initialHighlightCfi?: string
 }
 
-interface TextSearchResult {
-  id: string
-  chapterTitle: string
-  snippet: string
-  cfi?: string
-  href?: string
-}
-
-const READER_APPEARANCE_LS = 'epubReader_appearance'
-const READER_COLOR_LS_TR = 'epubReader_trColor'
-const READER_COLOR_LS_AR = 'epubReader_arColor'
-const READER_COLOR_LS_FA = 'epubReader_faColor'
-const DEFAULT_READER_TR = '#212121'
-const DEFAULT_READER_AR = '#1565C0'
-const DEFAULT_READER_FA = '#00695C'
-
-const READER_PALETTE_TR = ['#212121', '#000000', '#424242', '#5D4037', '#1565C0', '#00695C', '#2E7D32', '#6A1B9A', '#C62828', '#E65100'] as const
-const READER_PALETTE_AR = ['#1565C0', '#0D47A1', '#1976D2', '#00838F', '#00695C', '#2E7D32', '#283593', '#4A148C', '#B71C1C', '#212121'] as const
-const READER_PALETTE_FA = ['#00695C', '#004D40', '#00796B', '#00897B', '#1565C0', '#33691E', '#5D4037', '#37474F', '#263238', '#4E342E'] as const
-
-function readReaderColorLs(key: string, fallback: string): string {
-  if (typeof window === 'undefined') return fallback
-  try {
-    const v = localStorage.getItem(key)
-    if (v && /^#[0-9A-Fa-f]{6}$/.test(v.trim())) return v.trim()
-  } catch { /* ignore */ }
-  return fallback
-}
-
-const READER_APPEARANCE_IDS = new Set<string>(['light', 'sepia', 'dark', 'oled', 'system'])
-
-function readReaderAppearance(): ReaderAppearancePreset {
-  if (typeof window === 'undefined') return 'system'
-  try {
-    const v = localStorage.getItem(READER_APPEARANCE_LS)?.trim()
-    if (v && READER_APPEARANCE_IDS.has(v)) return v as ReaderAppearancePreset
-  } catch { /* ignore */ }
-  return 'system'
-}
-
-export function resolveReaderSurface(preset: ReaderAppearancePreset, isDark: boolean): ReaderSurfaceTheme {
-  if (preset === 'system') return isDark ? 'dark' : 'light'
-  return preset
-}
-
-const READER_SURFACE_SHELL: Record<ReaderSurfaceTheme, { bg: string; link: string }> = {
-  light: { bg: '#ffffff', link: '#2563eb' },
-  sepia: { bg: '#f4ecd8', link: '#b45309' },
-  dark: { bg: '#0f172a', link: '#93c5fd' },
-  oled: { bg: '#000000', link: '#60a5fa' },
-}
-
-const READER_FONT_LS_TR = 'epubReader_fontIdTr'
-const READER_FONT_LS_AR = 'epubReader_fontIdAr'
-const READER_FONT_LS_LEGACY = 'epubReader_fontId'
-const SYSTEM_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-
-/** Türkçe / Latin gövde — Arapça listesiyle ortak font yok. public/font + origin. */
-const READER_FONTS_TR = [
-  { id: 'sf-pro-tr', label: 'SF Pro TR', face: 'AppReaderSfProTr', file: 'SF-Pro-TR.ttf', fallbacks: 'sans-serif' },
-  { id: 'bnazanin', label: 'B Nazanin', face: 'AppReaderBNazanin', file: 'BNazanin.ttf', fallbacks: 'serif' },
-] as const
-
-/** Arapça / Farsça / RTL blokları — yalnızca bu tipografiler. */
-const READER_FONTS_AR = [
-  { id: 'scheherazade', label: 'Scheherazade New', face: 'AppReaderScheherazade', file: 'ScheherazadeNew-Regular.ttf', fallbacks: 'serif' },
-  { id: 'uthman-taha', label: 'Uthman Taha', face: 'AppReaderUthman', file: 'Uthman Taha Regular.ttf', fallbacks: 'serif' },
-  { id: 'amiri', label: 'Amiri', face: 'AppReaderAmiri', file: 'Amiri-Regular.ttf', fallbacks: 'serif' },
-] as const
-
-type ReaderFontDef = (typeof READER_FONTS_TR)[number] | (typeof READER_FONTS_AR)[number]
-
-const READER_FONT_TR_IDS = new Set<string>(READER_FONTS_TR.map((f) => f.id))
-const READER_FONT_AR_IDS = new Set<string>(READER_FONTS_AR.map((f) => f.id))
-
-const DEFAULT_READER_FONT_ID_TR = READER_FONTS_TR[0].id
-const DEFAULT_READER_FONT_ID_AR = READER_FONTS_AR[0].id
-
-function readReaderFontIdTr(): string {
-  if (typeof window === 'undefined') return DEFAULT_READER_FONT_ID_TR
-  try {
-    let v = localStorage.getItem(READER_FONT_LS_TR)?.trim()
-    if (v && READER_FONT_TR_IDS.has(v)) return v
-    const leg = localStorage.getItem(READER_FONT_LS_LEGACY)?.trim()
-    if (leg && READER_FONT_TR_IDS.has(leg)) return leg
-  } catch { /* ignore */ }
-  return DEFAULT_READER_FONT_ID_TR
-}
-
-function readReaderFontIdAr(): string {
-  if (typeof window === 'undefined') return DEFAULT_READER_FONT_ID_AR
-  try {
-    let v = localStorage.getItem(READER_FONT_LS_AR)?.trim()
-    if (v && READER_FONT_AR_IDS.has(v)) return v
-    const leg = localStorage.getItem(READER_FONT_LS_LEGACY)?.trim()
-    if (leg && READER_FONT_AR_IDS.has(leg)) return leg
-  } catch { /* ignore */ }
-  return DEFAULT_READER_FONT_ID_AR
-}
-
-function getReaderFontDefTr(id: string): (typeof READER_FONTS_TR)[number] {
-  return READER_FONTS_TR.find((f) => f.id === id) ?? READER_FONTS_TR[0]
-}
-
-function getReaderFontDefAr(id: string): (typeof READER_FONTS_AR)[number] {
-  return READER_FONTS_AR.find((f) => f.id === id) ?? READER_FONTS_AR[0]
-}
-
-function fontFaceBlock(origin: string, def: ReaderFontDef): string {
-  if (!def.file || !def.face || !origin) return ''
-  return `@font-face{font-family:'${def.face}';src:url('${origin}/font/${encodeURIComponent(def.file)}') format('truetype');font-display:swap;}`
-}
-
-function collectFontFaces(origin: string, defs: ReaderFontDef[]): string {
-  const seen = new Set<string>()
-  let out = ''
-  for (const d of defs) {
-    if (!d.face || seen.has(d.face)) continue
-    const block = fontFaceBlock(origin, d)
-    if (block) {
-      seen.add(d.face)
-      out += block
+function resolveEpubDisplayUrl(raw: string): string | null {
+  if (!raw || raw === 'demo-placeholder.epub') return null
+  const u = raw.trim()
+  if (/^https?:\/\//i.test(u)) return u
+  if (typeof window !== 'undefined') {
+    if (u.startsWith('/')) return `${window.location.origin}${u}`
+    try {
+      return new URL(u, window.location.origin).href
+    } catch {
+      return u
     }
   }
-  return out
-}
-
-/** Okuma yüzeyi (açık / sepia / koyu / OLED) — metin renkleri kullanıcı paletinden. */
-function buildReaderThemeCss(
-  surface: ReaderSurfaceTheme,
-  tr: string,
-  ar: string,
-  fa: string,
-  familyTr: string,
-  familyAr: string,
-  wTr: number,
-  wAr: number,
-  faceCss: string
-): string {
-  const shell = READER_SURFACE_SHELL[surface]
-  const arBlock = `
-html body [lang="ar"], html body [lang^="ar-"], html body :lang(ar), html body :lang(ara), html body .proepub-arabic {
-  color: ${ar} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-html body [lang="ar"] *, html body [lang^="ar-"] *, html body .proepub-arabic * {
-  color: ${ar} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-html body :lang(ar) *, html body :lang(ara) * {
-  color: ${ar} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]):not(:lang(tr)) {
-  color: ${ar} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) span,
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) div,
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) p,
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) i,
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) b,
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) em,
-html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) strong {
-  color: ${ar} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-body[dir="rtl"] {
-  color: ${ar} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-body[dir="rtl"] p, body[dir="rtl"] div, body[dir="rtl"] span, body[dir="rtl"] li,
-body[dir="rtl"] h1, body[dir="rtl"] h2, body[dir="rtl"] h3, body[dir="rtl"] h4, body[dir="rtl"] h5, body[dir="rtl"] h6,
-body[dir="rtl"] blockquote, body[dir="rtl"] section, body[dir="rtl"] article,
-body[dir="rtl"] td, body[dir="rtl"] th, body[dir="rtl"] caption, body[dir="rtl"] label {
-  color: ${ar} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-`
-  const faBlock = `
-html body [lang="fa"], html body [lang^="fa-"], html body :lang(fa), html body .proepub-farsi {
-  color: ${fa} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-html body [lang="fa"] *, html body [lang^="fa-"] *, html body .proepub-farsi * {
-  color: ${fa} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-html body :lang(fa) * {
-  color: ${fa} !important;
-  font-family: ${familyAr} !important;
-  font-weight: ${wAr} !important;
-}
-`
-  return `${faceCss}
-html {
-  background-color: ${shell.bg} !important;
-  color: ${tr} !important;
-}
-body {
-  background-color: ${shell.bg} !important;
-  color: ${tr} !important;
-  font-family: ${familyTr} !important;
-  font-weight: ${wTr} !important;
-  line-height: 1.6 !important;
-}
-p, div, span, section, article, li, blockquote, figcaption, dd, dt, pre, code, td, th, caption, label {
-  color: ${tr} !important;
-  background-color: transparent !important;
-  font-family: ${familyTr} !important;
-  font-weight: ${wTr} !important;
-}
-h1, h2, h3, h4, h5, h6 {
-  color: ${tr} !important;
-  opacity: 0.9;
-  background-color: transparent !important;
-  font-family: ${familyTr} !important;
-  font-weight: ${wTr} !important;
-}
-${arBlock}
-${faBlock}
-a, a:visited {
-  color: ${shell.link} !important;
-}
-`
-}
-
-const READER_WEIGHT_LS_TR = 'epubReader_weightTr'
-const READER_WEIGHT_LS_AR = 'epubReader_weightAr'
-const READER_WEIGHT_CHOICES = [300, 400, 500, 600, 700] as const
-
-function readReaderWeightLs(key: string, fallback: number): number {
-  if (typeof window === 'undefined') return fallback
-  try {
-    const v = parseInt(localStorage.getItem(key) || '', 10)
-    if (READER_WEIGHT_CHOICES.includes(v as (typeof READER_WEIGHT_CHOICES)[number])) return v
-  } catch { /* ignore */ }
-  return fallback
+  return u
 }
 
 // iOS için haptic feedback, TTS ve Clipboard
@@ -316,34 +96,37 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
-  const [readingAppearance, setReadingAppearance] = useState<ReaderAppearancePreset>(() => readReaderAppearance())
+
+  const readingAppearance = useReaderStore((s) => s.readingAppearance)
+  const trColor = useReaderStore((s) => s.trColor)
+  const arColor = useReaderStore((s) => s.arColor)
+  const faColor = useReaderStore((s) => s.faColor)
+  const readerFontIdTr = useReaderStore((s) => s.readerFontIdTr)
+  const readerFontIdAr = useReaderStore((s) => s.readerFontIdAr)
+  const readerWeightTr = useReaderStore((s) => s.readerWeightTr)
+  const readerWeightAr = useReaderStore((s) => s.readerWeightAr)
+  const fontSize = useReaderStore((s) => s.fontSize)
+  const progressPercentage = useReaderStore((s) => s.progressPercentage)
+  const setProgressPercentage = useReaderStore((s) => s.setProgressPercentage)
+
   const readingAppearanceRef = useRef(readingAppearance)
   readingAppearanceRef.current = readingAppearance
-  const [trColor, setTrColor] = useState(() => readReaderColorLs(READER_COLOR_LS_TR, DEFAULT_READER_TR))
-  const [arColor, setArColor] = useState(() => readReaderColorLs(READER_COLOR_LS_AR, DEFAULT_READER_AR))
-  const [faColor, setFaColor] = useState(() => readReaderColorLs(READER_COLOR_LS_FA, DEFAULT_READER_FA))
   const trColorRef = useRef(trColor)
   const arColorRef = useRef(arColor)
   const faColorRef = useRef(faColor)
   trColorRef.current = trColor
   arColorRef.current = arColor
   faColorRef.current = faColor
-  const [readerFontIdTr, setReaderFontIdTr] = useState<string>(() => readReaderFontIdTr())
-  const [readerFontIdAr, setReaderFontIdAr] = useState<string>(() => readReaderFontIdAr())
   const readerFontIdTrRef = useRef(readerFontIdTr)
   const readerFontIdArRef = useRef(readerFontIdAr)
   readerFontIdTrRef.current = readerFontIdTr
   readerFontIdArRef.current = readerFontIdAr
-  const [readerWeightTr, setReaderWeightTr] = useState<number>(() => readReaderWeightLs(READER_WEIGHT_LS_TR, 400))
-  const [readerWeightAr, setReaderWeightAr] = useState<number>(() => readReaderWeightLs(READER_WEIGHT_LS_AR, 400))
   const readerWeightTrRef = useRef(readerWeightTr)
   const readerWeightArRef = useRef(readerWeightAr)
   readerWeightTrRef.current = readerWeightTr
   readerWeightArRef.current = readerWeightAr
-  type ReadingSettingsTab = 'theme' | 'typography' | 'colors' | 'page'
-  const [readingSettingsTab, setReadingSettingsTab] = useState<ReadingSettingsTab>('theme')
-  const [fontSize, setFontSize] = useState(100)
-  const [progressPercentage, setProgressPercentage] = useState(0)
+
+  const displayUrl = useMemo(() => resolveEpubDisplayUrl(bookUrl), [bookUrl])
   const [bookmarks, setBookmarks] = useState<BookmarkType[]>([])
   const [showBookmarks, setShowBookmarks] = useState(false)
   const [isBookmarked, setIsBookmarked] = useState(false)
@@ -405,7 +188,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const lastWindowHeightRef = useRef<number | null>(null)
   const tocRef = useRef<any>(null)
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
-  const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const isFullscreenRef = useRef<boolean>(false)
   const prevIsFullscreenRef = useRef<boolean>(false)
   const contentDocsRef = useRef<Set<Document>>(new Set())
@@ -555,6 +337,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     if (el.textContent !== css) {
       el.textContent = css
     }
+    // EPUB içi stiller sonradan eklenebiliyor; aynı özgüllükte son kazansın diye style'ı head sonuna al.
+    try {
+      if (el.parentNode === head && head.lastElementChild !== el) {
+        head.appendChild(el)
+      }
+    } catch { /* ignore */ }
   }, [])
 
   const syncReaderThemeToIframes = useCallback(
@@ -643,31 +431,15 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     )
   }, [flatToc, searchQuery])
 
-  useEffect(() => {
+  // Tipografi / renk / tema değişince paint öncesi iframe’lere uygula (useEffect gecikmesi epub.js ile yarışabiliyordu).
+  useLayoutEffect(() => {
+    applyReaderInsets()
     try {
-      localStorage.setItem(READER_COLOR_LS_TR, trColor)
-      localStorage.setItem(READER_COLOR_LS_AR, arColor)
-      localStorage.setItem(READER_COLOR_LS_FA, faColor)
+      const r = renditionRef.current
+      if (r?.themes?.fontSize) {
+        r.themes.fontSize(`${useReaderStore.getState().fontSize}%`)
+      }
     } catch { /* ignore */ }
-  }, [trColor, arColor, faColor])
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(READER_FONT_LS_TR, readerFontIdTr)
-      localStorage.setItem(READER_FONT_LS_AR, readerFontIdAr)
-    } catch { /* ignore */ }
-  }, [readerFontIdTr, readerFontIdAr])
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(READER_WEIGHT_LS_TR, String(readerWeightTr))
-      localStorage.setItem(READER_WEIGHT_LS_AR, String(readerWeightAr))
-    } catch { /* ignore */ }
-  }, [readerWeightTr, readerWeightAr])
-
-  useEffect(() => {
-    const surface = resolveReaderSurface(readingAppearanceRef.current, isDarkModeRef.current)
-    syncReaderThemeToIframes(surface)
   }, [
     trColor,
     arColor,
@@ -677,7 +449,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     readerWeightTr,
     readerWeightAr,
     readingAppearance,
-    syncReaderThemeToIframes
+    fontSize,
+    applyReaderInsets,
   ])
 
   // Component mount olduğunda debug bilgisi
@@ -1419,7 +1192,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     rendition.themes.select(initialSurface)
 
     // Font boyutunu uygula
-    rendition.themes.fontSize(`${fontSize}%`)
+    rendition.themes.fontSize(`${useReaderStore.getState().fontSize}%`)
 
     // İlk render sonrası inset/padding uygula
     setTimeout(() => applyReaderInsets(), 80)
@@ -1463,7 +1236,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
 
     console.log('=== READER READY TAMAMLANDI ===')
-  }, [fontSize, currentChapter, applyReaderInsets, scrollMode, injectReaderThemeStyles])
+  }, [currentChapter, applyReaderInsets, scrollMode, injectReaderThemeStyles])
 
   // Highlight'ları render et
   const renderHighlights = useCallback(() => {
@@ -2275,61 +2048,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     setShowHighlightModal(true)
   }
 
-  // Debug için blobUrl değişikliklerini izle
+  // EPUB doğrudan URL ile açılır (blob indirme yok); epub.js parça parça okur.
   useEffect(() => {
-    console.log('EpubReader debug - blobUrl:', blobUrl, 'isLoading:', isLoading, 'error:', error)
-  }, [blobUrl, isLoading, error])
-
-  // Dosyayı blob olarak indir — revoke yalnızca bu effect'in oluşturduğu URL için (yarış / geçersiz blob önlenir)
-  useEffect(() => {
-    if (!bookUrl || bookUrl === 'demo-placeholder.epub') {
+    if (!displayUrl) {
       setError(t('reader.invalidUrl'))
       setIsLoading(false)
-      setBlobUrl(null)
       return
     }
-
-    let active = true
-    let objectUrlCreated: string | null = null
-
-    setBlobUrl(null)
     setIsLoading(true)
     setError(null)
-
-    ;(async () => {
-      try {
-        console.log('=== DOSYA İNDİRME BAŞLADI ===', bookUrl)
-        const response = await fetch(bookUrl)
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-        const blob = await response.blob()
-        const url = URL.createObjectURL(blob)
-        if (!active) {
-          URL.revokeObjectURL(url)
-          return
-        }
-        objectUrlCreated = url
-        setBlobUrl(url)
-        setIsLoading(false)
-        console.log('=== DOSYA İNDİRME TAMAMLANDI ===', url)
-      } catch (error) {
-        console.error('Dosya indirme hatası:', error)
-        if (active) {
-          setError(t('reader.downloadError'))
-          setIsLoading(false)
-        }
-      }
-    })()
-
-    return () => {
-      active = false
-      if (objectUrlCreated) {
-        URL.revokeObjectURL(objectUrlCreated)
-        objectUrlCreated = null
-      }
-    }
-  }, [bookUrl, t])
+  }, [displayUrl, bookUrl, t])
 
   useEffect(() => {
     contentDocsRef.current.clear()
@@ -2340,7 +2068,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   // Kullanıcı verilerini yükle (ilerleme ve bookmark'lar)
   useEffect(() => {
     const loadUserData = async () => {
-      if (userId && bookId && blobUrl) {
+      if (userId && bookId && displayUrl) {
         try {
           // İlerleme verilerini yükle
           const progress = await getReadingProgress(userId, bookId)
@@ -2374,7 +2102,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
 
     loadUserData()
-  }, [userId, bookId, blobUrl, initialLocation])
+  }, [userId, bookId, displayUrl, initialLocation])
 
   // Global listeden gelen ilk vurgulama için, highlight'lar yüklendikten sonra
   // aynı handleHighlightClick mantığını kullanarak navigate et
@@ -2533,10 +2261,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const applyReadingAppearancePreset = useCallback(
     (preset: ReaderAppearancePreset) => {
       readingAppearanceRef.current = preset
-      setReadingAppearance(preset)
-      try {
-        localStorage.setItem(READER_APPEARANCE_LS, preset)
-      } catch { /* ignore */ }
+      useReaderStore.getState().setReadingAppearance(preset)
 
       if (setDarkMode) {
         if (preset === 'light' || preset === 'sepia') setDarkMode(false)
@@ -2559,12 +2284,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     [setDarkMode, syncReaderThemeToIframes]
   )
 
-  const changeFontSize = (newSize: number) => {
-    setFontSize(newSize)
+  const changeFontSize = useCallback((newSize: number) => {
+    useReaderStore.getState().setFontSize(newSize)
     if (renditionRef.current) {
       renditionRef.current.themes.fontSize(`${newSize}%`)
     }
-  }
+  }, [])
 
   const resetReader = () => {
     if (renditionRef.current) {
@@ -3822,93 +3547,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         </div>
       </div>
 
-      {/* Modern Bookmark Panel */}
       {showBookmarks && !isFullscreen && (
-        <div className="bookmark-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{t('reader.bookmarks')}</h3>
-                <span className="text-sm text-gray-600 dark:text-gray-400">({bookmarks.length})</span>
-              </div>
-              <button
-                onClick={() => setShowBookmarks(false)}
-                className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
-                title="Kapat"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {bookmarks.length === 0 ? (
-              <div className="text-center py-8">
-                <Bookmark className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
-                <p className="text-gray-600 dark:text-gray-400">{t('reader.noBookmarks')}</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-48 overflow-y-auto">
-                {bookmarks.map((bookmark) => {
-                  const locationInfo = getBookmarkLocationInfo(bookmark)
-                  return (
-                    <div
-                      key={bookmark.id}
-                      onClick={() => goToBookmark(bookmark)}
-                      className="p-3 bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-xl border border-white/30 dark:border-dark-700/30 cursor-pointer hover:bg-white/80 dark:hover:bg-dark-700/80 transition-all duration-200 group"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          {bookmark.note && bookmark.note.includes('\n') ? (
-                            <>
-                              {/* Not varsa ve satır sonu içeriyorsa, notu üstte göster */}
-                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
-                                {bookmark.note.split('\n')[0]}
-                              </p>
-                              <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">
-                                {bookmark.note.split('\n')[1]}
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              {/* Not yoksa veya tek satırsa, sadece başlığı göster */}
-                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
-                                {locationInfo.title}
-                              </p>
-                              {bookmark.note && bookmark.note.trim() !== '' && (
-                                <p className="text-xs text-gray-700 dark:text-gray-300 mb-1 italic">
-                                  "{bookmark.note}"
-                                </p>
-                              )}
-                            </>
-                          )}
-                          {/* locationInfo.details kaldırıldı çünkü gereksiz tekrar yapıyordu */}
-                          <p className="text-xs text-gray-500 dark:text-gray-500">
-                            {new Date(bookmark.created_at).toLocaleDateString('tr-TR', {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 ml-2">
-                          <BookmarkCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                          <button
-                            onClick={(e) => deleteBookmarkItem(bookmark, e)}
-                            className="p-1 rounded-lg bg-red-100 dark:bg-red-900/50 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50 transition-colors flex items-center justify-center"
-                            title={t('reader.deleteBookmark')}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
+        <ReaderBookmarkPanel
+          bookmarks={bookmarks}
+          onClose={() => setShowBookmarks(false)}
+          onGoToBookmark={goToBookmark}
+          onDeleteBookmark={deleteBookmarkItem}
+          getBookmarkLocationInfo={getBookmarkLocationInfo}
+        />
       )}
 
       {/* Modern Highlight Panel */}
@@ -3923,485 +3569,43 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         />
       )}
 
-      {/* Search Panel */}
       {showSearch && !isFullscreen && (
-        <div className="search-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <Search className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                  {t('reader.search')}
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowSearch(false)}
-                className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
-                title={t('common.close')}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-start">
-              <div className="space-y-3 md:col-span-1">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {t('reader.search')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 relative">
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          void handleSearchSubmit()
-                        }
-                      }}
-                      placeholder={t('reader.searchPlaceholder')}
-                      inputMode="search"
-                      className="w-full px-3 py-2 pr-8 rounded-lg border border-gray-200 dark:border-dark-700 bg-white/80 dark:bg-dark-800/80 text-base md:text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/60"
-                      style={{ fontSize: '16px' }}
-                    />
-                    {searchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchQuery('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-dark-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex items-center justify-center"
-                        title={t('common.clear') || 'Temizle'}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handlePasteIntoSearch()}
-                    className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-dark-800 text-xs md:text-sm text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-dark-700 hover:bg-gray-200 dark:hover:bg-dark-700 transition-colors flex items-center justify-center"
-                  >
-                    <Clipboard className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => void handleSearchSubmit()}
-                    className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium shadow-md hover:shadow-lg transition-colors"
-                    disabled={isSearchingText && searchScope === 'text'}
-                  >
-                    {t('reader.search')}
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2 text-xs">
-                  <button
-                    onClick={() => setSearchScope('toc')}
-                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${searchScope === 'toc'
-                      ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
-                      : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                      }`}
-                  >
-                    {t('reader.searchInHeadings')}
-                  </button>
-                  <button
-                    onClick={() => setSearchScope('text')}
-                    className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${searchScope === 'text'
-                      ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
-                      : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                      }`}
-                  >
-                    {t('reader.searchInBook')}
-                  </button>
-                </div>
-
-                {searchScope === 'text' && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {t('reader.searchMinChars')}
-                  </p>
-                )}
-              </div>
-
-              <div className="md:col-span-2 space-y-3">
-                {searchScope === 'toc' && (
-                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                    {filteredToc.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {searchQuery.trim()
-                          ? t('reader.searchNoResults')
-                          : t('reader.searchPlaceholder')}
-                      </p>
-                    ) : (
-                      filteredToc.map((item: any, index: number) => (
-                        <button
-                          key={`${item.id || item.href || index}`}
-                          onClick={() => handleTocItemClick(item)}
-                          className="w-full text-left px-3 py-2 rounded-lg bg-white/70 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/40 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                        >
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {item.label}
-                          </p>
-                          {item.fullLabel && item.fullLabel !== item.label && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              {item.fullLabel}
-                            </p>
-                          )}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-
-                {searchScope === 'text' && (
-                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                    {isSearchingText ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {t('reader.searching')}
-                      </p>
-                    ) : textSearchResults.length === 0 ? (
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        {searchQuery.trim()
-                          ? t('reader.searchNoResults')
-                          : t('reader.searchPlaceholder')}
-                      </p>
-                    ) : (
-                      textSearchResults.map((result) => (
-                        <button
-                          key={result.id}
-                          onClick={() => handleTextSearchResultClick(result)}
-                          className="w-full text-left px-3 py-2 rounded-lg bg-white/70 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/40 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
-                        >
-                          <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">
-                            {result.chapterTitle}
-                          </p>
-                          <p className="text-sm text-gray-800 dark:text-gray-100 line-clamp-2">
-                            {result.snippet}
-                          </p>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <ReaderSearchPanel
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          searchScope={searchScope}
+          onSearchScopeChange={setSearchScope}
+          isSearchingText={isSearchingText}
+          textSearchResults={textSearchResults}
+          filteredToc={filteredToc}
+          onClose={() => setShowSearch(false)}
+          onSearchSubmit={handleSearchSubmit}
+          onPasteIntoSearch={handlePasteIntoSearch}
+          onTocItemClick={handleTocItemClick}
+          onTextResultClick={handleTextSearchResultClick}
+        />
       )}
 
-      {/* Okuma görünümü: üstten çekmece, kitap alanı hep görünür — canlı önizleme */}
       {showSettings && !isFullscreen && (
-        <div className="settings-panel z-10 mx-2 shrink-0 sm:mx-4 flex max-h-[min(50vh,520px)] flex-col overflow-hidden rounded-b-2xl border border-t-0 border-gray-200/90 bg-white/93 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.22)] backdrop-blur-xl dark:border-dark-700/55 dark:bg-dark-900/93 dark:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.5)] animate-in slide-in-from-top-2 duration-200">
-          <div className="flex shrink-0 items-start justify-between gap-2 border-b border-gray-200/70 px-3 py-2.5 dark:border-dark-700/50">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <div className="h-9 w-1 shrink-0 rounded-full bg-gradient-to-b from-sky-500 to-indigo-600" />
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-100">{t('reader.readingSettings')}</h3>
-                <p className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-                  Aşağıdaki sayfada canlı önizleme — tema, yazı ve renk değişince hemen görünür.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowSettings(false)}
-              className="shrink-0 rounded-lg border border-gray-200/80 bg-white/80 p-1.5 text-gray-600 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800/80 dark:text-gray-300 dark:hover:bg-dark-700"
-              title="Kapat"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-gray-100 px-2 py-2 dark:border-dark-800/80 [&::-webkit-scrollbar]:h-0">
-            {(
-              [
-                { id: 'theme' as const, label: t('reader.theme'), icon: Sparkles },
-                { id: 'typography' as const, label: t('reader.typographyTab'), icon: Type },
-                { id: 'colors' as const, label: t('reader.tabColors'), icon: Palette },
-                { id: 'page' as const, label: t('reader.pageTab'), icon: LayoutList },
-              ]
-            ).map((tab) => {
-              const Icon = tab.icon
-              const active = readingSettingsTab === tab.id
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setReadingSettingsTab(tab.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${active
-                    ? 'bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-md dark:from-sky-500 dark:to-indigo-500'
-                    : 'bg-gray-100/90 text-gray-600 hover:bg-gray-200/90 dark:bg-dark-800/80 dark:text-gray-300 dark:hover:bg-dark-700/90'
-                    }`}
-                >
-                  <Icon className="h-3.5 w-3.5 opacity-90" />
-                  {tab.label}
-                </button>
-              )
-            })}
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-4">
-            {readingSettingsTab === 'theme' && (
-              <div className="space-y-3">
-                <p className="text-xs text-gray-500 dark:text-gray-400">{t('reader.themePresetsHint')}</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {([
-                    { id: 'light' as const, name: t('reader.themeLight'), icon: Sun, desc: t('reader.themeLightDesc') },
-                    { id: 'sepia' as const, name: t('reader.themeSepia'), icon: Coffee, desc: t('reader.themeSepiaDesc') },
-                    { id: 'dark' as const, name: t('reader.themeDark'), icon: Moon, desc: t('reader.themeDarkDesc') },
-                    { id: 'oled' as const, name: t('reader.themeOled'), icon: Contrast, desc: t('reader.themeOledDesc') },
-                    { id: 'system' as const, name: t('reader.themeSystem'), icon: Monitor, desc: t('reader.themeSystemDesc') },
-                  ]).map((opt) => {
-                    const Icon = opt.icon
-                    const selected = readingAppearance === opt.id
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => applyReadingAppearancePreset(opt.id)}
-                        className={`flex flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 text-center transition-all ${selected
-                          ? 'border-sky-400 bg-gradient-to-br from-sky-50 to-indigo-50 shadow-md dark:border-sky-500/60 dark:from-sky-950/50 dark:to-indigo-950/40'
-                          : 'border-gray-200/90 bg-white/70 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800/50 dark:hover:border-dark-500'
-                          }`}
-                      >
-                        <Icon className="h-6 w-6 shrink-0 text-sky-600 dark:text-sky-400" />
-                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{opt.name}</span>
-                        <span className="line-clamp-2 text-[10px] leading-tight text-gray-500 dark:text-gray-400">{opt.desc}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {readingSettingsTab === 'typography' && (
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reader.fontSize')} · {fontSize}%</label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => changeFontSize(Math.max(50, fontSize - 10))}
-                      className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm dark:border-dark-600 dark:bg-dark-800"
-                    >
-                      A−
-                    </button>
-                    <input
-                      type="range"
-                      min={50}
-                      max={200}
-                      value={fontSize}
-                      onChange={(e) => changeFontSize(parseInt(e.target.value, 10))}
-                      className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-gray-200 dark:bg-dark-700"
-                      style={{
-                        background: `linear-gradient(to right, #0ea5e9 0%, #6366f1 ${(fontSize - 50) / 1.5}%, rgb(229 231 235) ${(fontSize - 50) / 1.5}%, rgb(229 231 235) 100%)`,
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => changeFontSize(Math.min(200, fontSize + 10))}
-                      className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm dark:border-dark-600 dark:bg-dark-800"
-                    >
-                      A+
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-xl border border-gray-200/80 bg-gray-50/50 p-3 dark:border-dark-600/60 dark:bg-dark-800/30">
-                    <p className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Türkçe · kalınlık</p>
-                    <div className="mb-3 flex flex-wrap gap-1">
-                      {([
-                        [300, 'İnce'],
-                        [400, 'Normal'],
-                        [500, 'Orta'],
-                        [600, 'Yarı kalın'],
-                        [700, 'Kalın'],
-                      ] as const).map(([w, lab]) => (
-                        <button
-                          key={w}
-                          type="button"
-                          onClick={() => setReaderWeightTr(w)}
-                          className={`rounded-lg px-2 py-1 text-[10px] font-medium ${readerWeightTr === w
-                            ? 'bg-sky-600 text-white dark:bg-sky-500'
-                            : 'bg-white text-gray-600 ring-1 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600'
-                            }`}
-                        >
-                          {lab}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mb-1.5 text-[10px] text-gray-500 dark:text-gray-400">Yazı tipi</p>
-                    <div className="max-h-36 space-y-1 overflow-y-auto pr-0.5">
-                      {READER_FONTS_TR.map((f) => (
-                        <label
-                          key={f.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 py-1 hover:bg-white/80 dark:hover:bg-dark-700/50"
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-3.5 w-3.5 rounded border-gray-300 text-sky-600"
-                            checked={readerFontIdTr === f.id}
-                            onChange={() => setReaderFontIdTr(f.id)}
-                          />
-                          <span className="text-xs text-gray-800 dark:text-gray-200">{f.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-gray-200/80 bg-gray-50/50 p-3 dark:border-dark-600/60 dark:bg-dark-800/30">
-                    <p className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Arapça · kalınlık</p>
-                    <div className="mb-3 flex flex-wrap gap-1">
-                      {([
-                        [300, 'İnce'],
-                        [400, 'Normal'],
-                        [500, 'Orta'],
-                        [600, 'Yarı kalın'],
-                        [700, 'Kalın'],
-                      ] as const).map(([w, lab]) => (
-                        <button
-                          key={w}
-                          type="button"
-                          onClick={() => setReaderWeightAr(w)}
-                          className={`rounded-lg px-2 py-1 text-[10px] font-medium ${readerWeightAr === w
-                            ? 'bg-indigo-600 text-white dark:bg-indigo-500'
-                            : 'bg-white text-gray-600 ring-1 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600'
-                            }`}
-                        >
-                          {lab}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mb-1.5 text-[10px] text-gray-500 dark:text-gray-400">lang=&quot;ar&quot;, .proepub-arabic veya RTL gövde</p>
-                    <div className="max-h-36 space-y-1 overflow-y-auto pr-0.5">
-                      {READER_FONTS_AR.map((f) => (
-                        <label
-                          key={f.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 py-1 hover:bg-white/80 dark:hover:bg-dark-700/50"
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
-                            checked={readerFontIdAr === f.id}
-                            onChange={() => setReaderFontIdAr(f.id)}
-                          />
-                          <span className="text-xs text-gray-800 dark:text-gray-200">{f.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {readingSettingsTab === 'colors' && (
-              <div className="space-y-4">
-                <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('reader.advancedColorsTitle')}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{t('reader.advancedColorsHint')}</p>
-                {(
-                  [
-                    { label: 'Türkçe / genel', value: trColor, set: setTrColor, palette: READER_PALETTE_TR },
-                    { label: 'Arapça', value: arColor, set: setArColor, palette: READER_PALETTE_AR },
-                    { label: 'Farsça', value: faColor, set: setFaColor, palette: READER_PALETTE_FA },
-                  ] as const
-                ).map((row) => (
-                  <div key={row.label}>
-                    <label className="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-400">{row.label}</label>
-                    <div className="flex flex-wrap gap-2" role="group" aria-label={row.label}>
-                      {row.palette.map((hex) => (
-                        <button
-                          key={hex}
-                          type="button"
-                          title={hex}
-                          aria-label={`${row.label} ${hex}`}
-                          aria-pressed={row.value === hex}
-                          onClick={() => row.set(hex)}
-                          className={`h-8 w-8 shrink-0 rounded-full border-2 shadow-sm transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${row.value.toLowerCase() === hex.toLowerCase()
-                            ? 'scale-105 border-sky-500 ring-2 ring-sky-400/40'
-                            : 'border-gray-200 dark:border-dark-600'
-                            }`}
-                          style={{ backgroundColor: hex }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {readingSettingsTab === 'page' && (
-              <div className="space-y-4">
-                <div>
-                  <label className="mb-2 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reader.scrollMode')}</label>
-                  <div className="flex gap-2">
-                    {[
-                      { id: 'paginated', name: t('reader.modePaginated') || 'Sayfalama', icon: BookOpen },
-                      { id: 'scroll', name: t('reader.modeScroll') || 'Kaydırma', icon: ScrollText },
-                    ].map((mode) => {
-                      const Icon = mode.icon
-                      return (
-                        <button
-                          key={mode.id}
-                          type="button"
-                          onClick={() => {
-                            const newScrollMode = mode.id === 'scroll'
-                            if (newScrollMode !== scrollMode) {
-                              setScrollMode(newScrollMode)
-                              localStorage.setItem(`scrollMode_${bookId}`, String(newScrollMode))
-                              if (!newScrollMode) {
-                                const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-                                if (isMobile) {
-                                  if (userId && bookId) {
-                                    saveReadingProgress(userId, bookId, String(location), progressPercentage).catch(() => { })
-                                  }
-                                  setTimeout(() => window.location.reload(), 100)
-                                }
-                              }
-                            }
-                          }}
-                          className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-2 py-2.5 transition-all ${(mode.id === 'scroll' ? scrollMode : !scrollMode)
-                            ? 'border-sky-400 bg-sky-50 dark:border-sky-600 dark:bg-sky-950/40'
-                            : 'border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/60'
-                            }`}
-                        >
-                          <Icon className="h-5 w-5 text-gray-700 dark:text-gray-200" />
-                          <span className="text-center text-xs font-medium text-gray-800 dark:text-gray-100">{mode.name}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <p className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">{t('reader.scrollModeHint')}</p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-dark-700/50">
-                  <button
-                    type="button"
-                    onClick={toggleBookmark}
-                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isBookmarked
-                      ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-200'
-                      : 'border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800'
-                      }`}
-                  >
-                    {isBookmarked ? <BookmarkCheck className="h-4 w-4" /> : <BookmarkPlus className="h-4 w-4" />}
-                    {isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
-                  </button>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">{t('reader.bookmarksCount', { count: bookmarks.length })}</span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={resetReader}
-                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  {t('reader.reset')}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        <ReaderSettingsPanel
+          bookId={bookId}
+          userId={userId}
+          scrollMode={scrollMode}
+          location={location}
+          isBookmarked={isBookmarked}
+          bookmarkCount={bookmarks.length}
+          onClose={() => setShowSettings(false)}
+          onAppearancePreset={applyReadingAppearancePreset}
+          onFontSizeChange={changeFontSize}
+          onScrollModeSelect={setScrollMode}
+          toggleBookmark={toggleBookmark}
+          resetReader={resetReader}
+        />
       )}
 
       {/* Book Reader — min-h-0: üstteki çekmece açıkken kitap alanı küçülüp hep görünür kalır */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {blobUrl ? (
+        {displayUrl ? (
           <div
             className={`w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${isFullscreen ? 'fullscreen' : ''
               } ${!isFullscreen ? 'md:pb-8' : ''} ${scrollMode ? 'scroll-mode' : ''}`}
@@ -4409,7 +3613,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           >
             <ReactReader
               key={`reader-${bookId}-${scrollMode ? 'scroll' : 'paginated'}`}
-              url={blobUrl}
+              url={displayUrl}
               location={location}
               locationChanged={locationChanged}
               getRendition={onReaderReady}
@@ -4555,7 +3759,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       />
 
       {/* Context Menu */}
-      <ContextMenu
+      <ReaderContextMenu
         show={showContextMenu}
         x={contextMenuPosition.x}
         y={contextMenuPosition.y}

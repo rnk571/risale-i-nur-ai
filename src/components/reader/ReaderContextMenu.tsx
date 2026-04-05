@@ -2,7 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Highlighter, Copy, Search, Volume2, X } from 'lucide-react'
 
-interface ContextMenuProps {
+export interface ReaderContextMenuProps {
   show: boolean
   x: number
   y: number
@@ -15,7 +15,7 @@ interface ContextMenuProps {
   isTtsAvailable?: boolean
 }
 
-export const ContextMenu: React.FC<ContextMenuProps> = ({
+export const ReaderContextMenu: React.FC<ReaderContextMenuProps> = ({
   show,
   x,
   y,
@@ -31,25 +31,21 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
   if (!show || !selectedText) return null
 
-  // Responsive menü boyutları
   const isMobile = window.innerWidth < 768
   const menuWidth = isMobile ? Math.min(280, window.innerWidth - 20) : 240
   const menuItemCount = isTtsAvailable && onSpeak ? 4 : 3
   const menuHeight = 60 + (menuItemCount * 44) + 8
-  
-  // Menüyü x etrafında ortala, y'nin altına yerleştir; kenarlara göre kırp
+
   let adjustedX = x - menuWidth / 2
   let adjustedY = y
-  
-  // Sağ/sol kenar taşmasını engelle
+
   if (adjustedX + menuWidth > window.innerWidth - 10) {
     adjustedX = window.innerWidth - menuWidth - 10
   }
   if (adjustedX < 10) {
     adjustedX = 10
   }
-  
-  // Alt/üst taşmalar için düzelt
+
   if (adjustedY + menuHeight > window.innerHeight - 10) {
     adjustedY = y - menuHeight - 10
   }
@@ -59,14 +55,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
   return (
     <>
-      {/* Backdrop - sadece görsel, etkileşim yok (seçim handle'larını bozmasın) */}
       <div
         className="fixed inset-0 z-40 bg-black/10 backdrop-blur-[1px]"
         style={{ pointerEvents: 'none', userSelect: 'none' }}
       />
-      
-      {/* Menu */}
-      <div 
+
+      <div
         className={`
           fixed z-50 context-menu select-none
           bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl
@@ -84,13 +78,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onMouseDown={(e) => e.stopPropagation()}
         onTouchStart={(e) => e.stopPropagation()}
       >
-        {/* Gradient accent border */}
         <div className="absolute inset-0 bg-gradient-to-b from-blue-500/20 to-purple-500/20 rounded-2xl p-[1px]">
           <div className="w-full h-full bg-white/95 dark:bg-gray-900/95 rounded-2xl" />
         </div>
-        
+
         <div className="relative">
-          {/* Kapatma butonu (X) - onClose prop'unu kullanır */}
           <button
             type="button"
             onClick={onClose}
@@ -101,14 +93,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           >
             <X size={14} />
           </button>
-          {/* Seçilen metin önizlemesi */}
           <div className="px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
             <p className={`text-xs text-gray-500 dark:text-gray-400 truncate font-medium ${isMobile ? 'max-w-[240px]' : 'max-w-[200px]'}`}>
               "{selectedText.length > (isMobile ? 40 : 30) ? selectedText.substring(0, isMobile ? 40 : 30) + '...' : selectedText}"
             </p>
           </div>
-          
-          {/* Menu seçenekleri */}
+
           <div className="p-2">
             {isTtsAvailable && onSpeak && (
               <button
@@ -143,7 +133,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
               <Highlighter size={18} className="flex-shrink-0" />
               <span className="flex-1 text-left">{t('reader.highlight')}</span>
             </button>
-            
+
             <button
               onClick={(e) => { e.stopPropagation(); onCopy() }}
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onCopy() }}
@@ -159,7 +149,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
               <Copy size={18} className="flex-shrink-0" />
               <span className="flex-1 text-left">{t('reader.copy')}</span>
             </button>
-            
+
             <button
               onClick={(e) => { e.stopPropagation(); onSearch() }}
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onSearch() }}
