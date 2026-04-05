@@ -38,11 +38,16 @@ export function resolveReaderSurface(preset: ReaderAppearancePreset, isDark: boo
   return preset
 }
 
-const READER_SURFACE_SHELL: Record<ReaderSurfaceTheme, { bg: string; link: string }> = {
+export const READER_SURFACE_SHELL: Record<ReaderSurfaceTheme, { bg: string; link: string }> = {
   light: { bg: '#ffffff', link: '#2563eb' },
   sepia: { bg: '#f4ecd8', link: '#b45309' },
   dark: { bg: '#0f172a', link: '#93c5fd' },
   oled: { bg: '#000000', link: '#60a5fa' },
+}
+
+/** Mevcut yüzeyin arka plan rengini döner (beyaz flaşı önlemek için hızlı erişim). */
+export function getReaderSurfaceBg(surface: ReaderSurfaceTheme): string {
+  return READER_SURFACE_SHELL[surface].bg
 }
 
 export const READER_FONT_LS_TR = 'epubReader_fontIdTr'
@@ -200,6 +205,8 @@ html body :lang(fa) * {
 html {
   background-color: ${shell.bg} !important;
   color: ${tr} !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 body {
   background-color: ${shell.bg} !important;
@@ -207,6 +214,8 @@ body {
   font-family: ${familyTr} !important;
   font-weight: ${wTr} !important;
   line-height: 1.6 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 p, div, span, section, article, li, blockquote, figcaption, dd, dt, pre, code, td, th, caption, label {
   color: ${tr} !important;

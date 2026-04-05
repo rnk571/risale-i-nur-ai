@@ -1,30 +1,41 @@
-import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import React, { useCallback, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ReactReader, ReactReaderStyle } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Highlighter, CheckCircle2, XCircle, Info, Search } from 'lucide-react'
+import { BookOpen, ArrowLeft, BookmarkCheck, BookmarkPlus, X, AlertTriangle, Minimize, Sun, Moon, CheckCircle2, XCircle, Info } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType, addHighlight, getHighlights, updateHighlight, deleteHighlight, type Highlight } from '../lib/progressService'
 import { trackEvent } from '../lib/analytics'
 import { BookmarkNoteModal } from './BookmarkNoteModal'
 import { HighlightModal } from './HighlightModal'
-import { HighlightPanel } from './HighlightPanel'
 import { ReaderContextMenu } from './reader/ReaderContextMenu'
+import { ReaderHighlightPanel } from './reader/ReaderHighlightPanel'
+import { ReaderMainMenu } from './reader/ReaderMainMenu'
+import { useRenderPerformance } from '../hooks/useRenderPerformance'
+import { triggerReaderHaptic } from '../lib/readerHaptics'
 import { ReaderBookmarkPanel } from './reader/ReaderBookmarkPanel'
-import { ReaderSearchPanel, type TextSearchResult } from './reader/ReaderSearchPanel'
+import { ReaderSearchPanel } from './reader/ReaderSearchPanel'
+import type { TextSearchResult } from './reader/searchTypes'
 import { ReaderSettingsPanel } from './reader/ReaderSettingsPanel'
+import { ReaderNavigation } from './reader/ReaderNavigation'
 import { useReaderStore } from '../stores/useReaderStore'
+import { useReaderEngine } from '../hooks/useReaderEngine'
+import { resolveBookUrl, checkAndUpdateInBackground } from '../lib/bookCacheService'
+import { useShallow } from 'zustand/react/shallow'
 import {
-  buildReaderThemeCss,
-  collectFontFaces,
-  getReaderFontDefAr,
-  getReaderFontDefTr,
+  getReaderSurfaceBg,
   resolveReaderSurface,
   SYSTEM_FONT_STACK,
-  type ReaderAppearancePreset,
-  type ReaderSurfaceTheme,
 } from './reader/readerTheme'
 
 export type { ReaderAppearancePreset, ReaderSurfaceTheme } from './reader/readerTheme'
 export { resolveReaderSurface } from './reader/readerTheme'
+
+/** epub iframe içi yatay/dikey kenar boşlukları (px) — ayar: indeks 0..2, tam ekranda her zaman 0 */
+export const READER_MARGIN_PRESETS_X = [0, 8, 16] as const
+export const READER_MARGIN_PRESETS_Y = [0, 8, 16] as const
+/** @deprecated READER_MARGIN_PRESETS_X kullanın */
+export const READER_MARGIN_PRESET_X = READER_MARGIN_PRESETS_X[0]
+/** @deprecated READER_MARGIN_PRESETS_Y kullanın */
+export const READER_MARGIN_PRESET_Y = READER_MARGIN_PRESETS_Y[0]
 
 interface EpubReaderProps {
   bookUrl: string
@@ -39,6 +50,11 @@ interface EpubReaderProps {
   setDarkMode?: (dark: boolean) => void
   initialLocation?: string
   initialHighlightCfi?: string
+  /**
+   * Açılmış EPUB’un kök URL’i (ör. `.../kitap-id/` → altında `META-INF/container.xml`).
+   * epub.js bu modda zip’i belleğe almaz; container, OPF ve bölümler ayrı isteklerle yüklenir.
+   */
+  epubUnpackedBaseUrl?: string | null
 }
 
 function resolveEpubDisplayUrl(raw: string): string | null {
@@ -56,16 +72,46 @@ function resolveEpubDisplayUrl(raw: string): string | null {
   return u
 }
 
-// iOS için haptic feedback, TTS ve Clipboard
-let haptics: any = null
+/** `.epub` zip paketi: epub.js tüm dosyayı indirip JSZip ile açar. */
+export function isPackedEpubAssetUrl(href: string): boolean {
+  if (!href || href === 'demo-placeholder.epub') return true
+  const pathOnly = href.split(/[?#]/)[0].trim().toLowerCase()
+  try {
+    const u = new URL(pathOnly, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+    return u.pathname.endsWith('.epub')
+  } catch {
+    return pathOnly.endsWith('.epub')
+  }
+}
+
+/**
+ * ReactReader’a verilecek URL ve epub.js `openAs` stratejisi.
+ * Paketli `.epub` → tek indirme; açılmış kök URL → streaming benzeri (bölüm başına HTTP).
+ */
+export function resolveEpubOpenSource(
+  bookUrl: string,
+  unpackedBaseUrl?: string | null
+): { readerUrl: string | null; packedEpub: boolean } {
+  // Öncelik: açılmış EPUB kökü → epub.js yalnızca okunan spine/HTML dosyalarını HTTP ile çeker (streaming).
+  if (unpackedBaseUrl?.trim()) {
+    const readerUrl = resolveEpubDisplayUrl(unpackedBaseUrl.trim())
+    if (!readerUrl) return { readerUrl: null, packedEpub: true }
+    return { readerUrl, packedEpub: isPackedEpubAssetUrl(readerUrl) }
+  }
+  const readerUrl = resolveEpubDisplayUrl(bookUrl)
+  if (!readerUrl) return { readerUrl: null, packedEpub: true }
+  // Blob/ObjectURL kullanılmıyor; doğrudan HTTP URL ile açılır (küçük dosyalar dahil tek zip indirme).
+  if (readerUrl.startsWith('blob:')) {
+    console.warn('[EPUB] blob: URL okuyucuda desteklenmiyor; HTTPS URL veya epub_unpacked_base_url kullanın.')
+    return { readerUrl: null, packedEpub: true }
+  }
+  return { readerUrl, packedEpub: true }
+}
+
+// TTS ve Clipboard (haptics → lib/readerHaptics)
 let tts: any = null
 let nativeClipboard: any = null
 if (typeof window !== 'undefined' && (window as any).Capacitor) {
-  import('@capacitor/haptics').then(({ Haptics }) => {
-    haptics = Haptics
-  }).catch(() => {
-    console.log('Haptics plugin yüklenemedi')
-  })
   import('@capacitor-community/text-to-speech').then((mod) => {
     tts = mod.TextToSpeech || mod
   }).catch(() => {
@@ -89,13 +135,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   toggleDarkMode,
   setDarkMode,
   initialLocation,
-  initialHighlightCfi
+  initialHighlightCfi,
+  epubUnpackedBaseUrl,
 }) => {
+  useRenderPerformance('EpubReader')
   const { t } = useTranslation()
-  const [location, setLocation] = useState<string | number>(0)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [showSettings, setShowSettings] = useState(false)
+
+  const isLoading = useReaderStore((s) => s.epubLoading)
+  const setIsLoading = useReaderStore((s) => s.setEpubLoading)
+  const error = useReaderStore((s) => s.epubError)
+  const setError = useReaderStore((s) => s.setEpubError)
 
   const readingAppearance = useReaderStore((s) => s.readingAppearance)
   const trColor = useReaderStore((s) => s.trColor)
@@ -108,298 +157,410 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const fontSize = useReaderStore((s) => s.fontSize)
   const progressPercentage = useReaderStore((s) => s.progressPercentage)
   const setProgressPercentage = useReaderStore((s) => s.setProgressPercentage)
+  const epubLocation = useReaderStore((s) => s.epubLocation)
+  const setEpubLocation = useReaderStore((s) => s.setEpubLocation)
 
-  const readingAppearanceRef = useRef(readingAppearance)
-  readingAppearanceRef.current = readingAppearance
-  const trColorRef = useRef(trColor)
-  const arColorRef = useRef(arColor)
-  const faColorRef = useRef(faColor)
-  trColorRef.current = trColor
-  arColorRef.current = arColor
-  faColorRef.current = faColor
-  const readerFontIdTrRef = useRef(readerFontIdTr)
-  const readerFontIdArRef = useRef(readerFontIdAr)
-  readerFontIdTrRef.current = readerFontIdTr
-  readerFontIdArRef.current = readerFontIdAr
-  const readerWeightTrRef = useRef(readerWeightTr)
-  const readerWeightArRef = useRef(readerWeightAr)
-  readerWeightTrRef.current = readerWeightTr
-  readerWeightArRef.current = readerWeightAr
+  const {
+    showSettings,
+    showBookmarks,
+    showSearch,
+    showMenu,
+    showHighlights,
+    showContextMenu,
+    contextMenuPosition,
+    searchQuery,
+    searchScope,
+    setShowSettings,
+    setShowBookmarks,
+    setShowSearch,
+    setShowMenu,
+    setShowHighlights,
+    setShowContextMenu,
+    setContextMenuPosition,
+    setTextSearchResults,
+    setIsSearchingText,
+    resetReaderSession,
+    appendSearchQuery,
+    bookmarks,
+    setBookmarks,
+    isBookmarked,
+    setIsBookmarked,
+    isFullscreen,
+    setIsFullscreen,
+    readerChromeVisible,
+    setReaderChromeVisible,
+    showBookmarkNoteModal,
+    setShowBookmarkNoteModal,
+    pendingBookmarkLocation,
+    setPendingBookmarkLocation,
+    highlights,
+    setHighlights,
+    showHighlightModal,
+    setShowHighlightModal,
+    pendingHighlight,
+    setPendingHighlight,
+    editingHighlight,
+    setEditingHighlight,
+    readerToast,
+    setReaderToast,
+    toastEnter,
+    setToastEnter,
+    ttsLanguage,
+    setTtsLanguage,
+    currentPage,
+    setCurrentPage,
+    totalPages,
+    setTotalPages,
+    pageInput,
+    setPageInput,
+    currentChapter,
+    setCurrentChapter,
+    readerToc: toc,
+    setReaderToc: setToc,
+    lastSelectedText,
+    setLastSelectedText,
 
-  const displayUrl = useMemo(() => resolveEpubDisplayUrl(bookUrl), [bookUrl])
-  const [bookmarks, setBookmarks] = useState<BookmarkType[]>([])
-  const [showBookmarks, setShowBookmarks] = useState(false)
-  const [isBookmarked, setIsBookmarked] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [showMenu, setShowMenu] = useState(false)
-  const [showBookmarkNoteModal, setShowBookmarkNoteModal] = useState(false)
-  const [pendingBookmarkLocation, setPendingBookmarkLocation] = useState<string>('')
+    scrollMode,
+    readerNavChromeMode,
+    readerMarginPresetIndex,
+  } = useReaderStore(
+    useShallow((s) => ({
+      showSettings: s.showSettings,
+      showBookmarks: s.showBookmarks,
+      showSearch: s.showSearch,
+      showMenu: s.showMenu,
+      showHighlights: s.showHighlights,
+      showContextMenu: s.showContextMenu,
+      contextMenuPosition: s.contextMenuPosition,
+      searchQuery: s.searchQuery,
+      searchScope: s.searchScope,
+      setShowSettings: s.setShowSettings,
+      setShowBookmarks: s.setShowBookmarks,
+      setShowSearch: s.setShowSearch,
+      setShowMenu: s.setShowMenu,
+      setShowHighlights: s.setShowHighlights,
+      setShowContextMenu: s.setShowContextMenu,
+      setContextMenuPosition: s.setContextMenuPosition,
+      setTextSearchResults: s.setTextSearchResults,
+      setIsSearchingText: s.setIsSearchingText,
+      resetReaderSession: s.resetReaderSession,
+      appendSearchQuery: s.appendSearchQuery,
+      bookmarks: s.bookmarks,
+      setBookmarks: s.setBookmarks,
+      isBookmarked: s.isBookmarked,
+      setIsBookmarked: s.setIsBookmarked,
+      isFullscreen: s.isFullscreen,
+      setIsFullscreen: s.setIsFullscreen,
+      readerChromeVisible: s.readerChromeVisible,
+      setReaderChromeVisible: s.setReaderChromeVisible,
+      showBookmarkNoteModal: s.showBookmarkNoteModal,
+      setShowBookmarkNoteModal: s.setShowBookmarkNoteModal,
+      pendingBookmarkLocation: s.pendingBookmarkLocation,
+      setPendingBookmarkLocation: s.setPendingBookmarkLocation,
+      highlights: s.highlights,
+      setHighlights: s.setHighlights,
+      showHighlightModal: s.showHighlightModal,
+      setShowHighlightModal: s.setShowHighlightModal,
+      pendingHighlight: s.pendingHighlight,
+      setPendingHighlight: s.setPendingHighlight,
+      editingHighlight: s.editingHighlight,
+      setEditingHighlight: s.setEditingHighlight,
+      readerToast: s.readerToast,
+      setReaderToast: s.setReaderToast,
+      toastEnter: s.toastEnter,
+      setToastEnter: s.setToastEnter,
+      ttsLanguage: s.ttsLanguage,
+      setTtsLanguage: s.setTtsLanguage,
+      currentPage: s.currentPage,
+      setCurrentPage: s.setCurrentPage,
+      totalPages: s.totalPages,
+      setTotalPages: s.setTotalPages,
+      pageInput: s.pageInput,
+      setPageInput: s.setPageInput,
+      currentChapter: s.currentChapter,
+      setCurrentChapter: s.setCurrentChapter,
+      readerToc: s.readerToc,
+      setReaderToc: s.setReaderToc,
+      lastSelectedText: s.lastSelectedText,
+      setLastSelectedText: s.setLastSelectedText,
+      scrollMode: s.scrollMode,
+      readerNavChromeMode: s.readerNavChromeMode,
+      readerMarginPresetIndex: s.readerMarginPresetIndex,
+    }))
+  )
 
-  // Highlight states
-  const [highlights, setHighlights] = useState<Highlight[]>([])
-  const [showHighlights, setShowHighlights] = useState(false)
-  const [showHighlightModal, setShowHighlightModal] = useState(false)
-  const [pendingHighlight, setPendingHighlight] = useState<{
-    cfiRange: string
-    selectedText: string
-    chapterTitle?: string
-  } | null>(null)
-  const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null)
-  const [showToast, setShowToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null)
-  const [toastEnter, setToastEnter] = useState(false)
-  const [ttsLanguage, setTtsLanguage] = useState<string>('tr-TR')
+  const { readerUrl: rawDisplayUrl, packedEpub } = useMemo(
+    () => resolveEpubOpenSource(bookUrl, epubUnpackedBaseUrl),
+    [bookUrl, epubUnpackedBaseUrl]
+  )
 
-  // Search states
-  const [showSearch, setShowSearch] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchScope, setSearchScope] = useState<'toc' | 'text'>('toc')
-  const [textSearchResults, setTextSearchResults] = useState<TextSearchResult[]>([])
-  const [isSearchingText, setIsSearchingText] = useState(false)
+  // ── Offline-First: önce cache'ten sun, arka planda güncelle ─────────────────
+  const [displayUrl, setDisplayUrlState] = React.useState<string | null>(rawDisplayUrl)
+  useEffect(() => {
+    if (!rawDisplayUrl) { setDisplayUrlState(null); return }
+    // Blob URL'leri doğrudan kullan (zaten indiridi)
+    if (rawDisplayUrl.startsWith('blob:')) { setDisplayUrlState(rawDisplayUrl); return }
+    let cancelled = false
+    resolveBookUrl(rawDisplayUrl, bookId).then((cached) => {
+      if (!cancelled) setDisplayUrlState(cached ?? rawDisplayUrl)
+    }).catch(() => {
+      if (!cancelled) setDisplayUrlState(rawDisplayUrl)
+    })
+    // Sessiz güncelleme kontrolü — fire-and-forget
+    checkAndUpdateInBackground(rawDisplayUrl, bookId)
+    return () => { cancelled = true }
+  }, [rawDisplayUrl, bookId])
 
-  // Scroll mode state - infinity scroll için
-  // Scroll mode state - infinity scroll için
-  const [scrollMode, setScrollMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(`scrollMode_${bookId}`)
-      if (saved !== null) {
-        return saved === 'true'
-      }
-      // Android cihazlarda varsayılan olarak scroll modunda aç
-      const isAndroid = /Android/i.test(navigator.userAgent)
-      return isAndroid
+  useEffect(() => {
+    resetReaderSession()
+    const savedScroll = typeof window !== 'undefined' ? localStorage.getItem(`scrollMode_${bookId}`) : null
+    const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+    const sm =
+      savedScroll === 'true' ? true : savedScroll === 'false' ? false : isAndroid
+    useReaderStore.getState().setScrollMode(sm)
+  }, [bookId, resetReaderSession])
+
+  useEffect(() => {
+    if (initialLocation) {
+      setEpubLocation(initialLocation)
     }
-    return false
+  }, [bookId, initialLocation, setEpubLocation])
+
+  const readerChromeHideTimerRef = useRef<number | null>(null)
+
+  // ── useReaderEngine: tema, navigasyon, font — motor mantığı buradan gelir ──
+  const engine = useReaderEngine({
+    isDarkMode,
+    readingAppearance,
+    trColor,
+    arColor,
+    faColor,
+    readerFontIdTr,
+    readerFontIdAr,
+    readerWeightTr,
+    readerWeightAr,
+    setDarkMode,
   })
 
-  // Context menu states
-  const [showContextMenu, setShowContextMenu] = useState(false)
-  const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 })
+  const {
+    renditionRef,
+    contentDocsRef,
+    isFullscreenRef,
+    isDarkModeRef,
+    readingAppearanceRef,
+    ensureReaderLayoutOverrides,
+    injectReaderThemeStyles,
+    syncReaderThemeToIframes,
+    applyReaderInsets,
+    applyReadingAppearancePreset,
+    goToNext,
+    goToPrevious,
+    goToPage,
+    changeFontSize,
+  } = engine
 
-  const renditionRef = useRef<any>(null)
   const suppressNextSelectionRef = useRef<boolean>(false)
-  // Android seçim davranışı için timeout ref'i (seçim bitince menü açmak için)
   const androidSelectionTimeoutRef = useRef<number | null>(null)
-  // iOS seçim durumu için ref'ler
   const iosIsTouchSelectingRef = useRef<boolean>(false)
   const iosLastSelectionTextRef = useRef<string>('')
   const iosLastSelectionChangeTimeRef = useRef<number>(0)
   const iosMenuShownForSelectionRef = useRef<boolean>(false)
+  const processIosIframeSelectionRef = useRef<(iframe: HTMLIFrameElement) => void>(() => {})
   const lastLocationRef = useRef<string | number>(0)
   const lastWindowHeightRef = useRef<number | null>(null)
   const tocRef = useRef<any>(null)
   const bottomNavRef = useRef<HTMLDivElement | null>(null)
-  const isFullscreenRef = useRef<boolean>(false)
   const prevIsFullscreenRef = useRef<boolean>(false)
-  const contentDocsRef = useRef<Set<Document>>(new Set())
-  /** Renk/font/ağırlık aynıyken tüm iframe’lere aynı CSS string’i yeniden birleştirmeyi atla. */
-  const readerThemeCssCacheRef = useRef<{
-    sig: string
-    light: string
-    sepia: string
-    dark: string
-    oled: string
-  } | null>(null)
-  const isDarkModeRef = useRef(isDarkMode)
   const searchHighlightCfiRef = useRef<string | null>(null)
   const hasNavigatedToInitialHighlightRef = useRef<boolean>(false)
   const hasNavigatedToInitialLocationRef = useRef<boolean>(false)
   const preExitLocationRef = useRef<string | null>(null)
 
+  const pinchGestureActiveRef = useRef(false)
+  const pinchInitialDistanceRef = useRef(0)
+  const pinchBaseFontRef = useRef(100)
+  const pinchPendingFontRef = useRef<number | null>(null)
+  const pinchRafScheduledRef = useRef(false)
+  const pinchRafIdRef = useRef<number | null>(null)
+
+  // isFullscreenRef engine'den geliyor; değişince engine'e yansıt
   useEffect(() => {
     isFullscreenRef.current = isFullscreen
   }, [isFullscreen])
 
-  useEffect(() => {
-    isDarkModeRef.current = isDarkMode
-  }, [isDarkMode])
+  const headerBarOpen =
+    !isFullscreen &&
+    (readerNavChromeMode === 'always' ||
+      (readerNavChromeMode === 'on_touch' && readerChromeVisible))
 
-  // ReactReader default olarak reader alanını soldan/sağdan 50px daraltıyor.
-  // Fullscreen'de gerçek "tam ekran" hissi için bu inset'leri küçültüyoruz.
-  const fullscreenReaderStyles = useMemo(() => {
-    if (!isFullscreen) return undefined
-    return {
+  const readerViewportChromeHidden =
+    !isFullscreen && readerNavChromeMode === 'on_touch' && !readerChromeVisible
+
+  const mainChromePadClass =
+    isFullscreen || readerNavChromeMode === 'hidden'
+      ? 'reader-main-chrome-pad--hidden'
+      : readerNavChromeMode === 'always' || (readerNavChromeMode === 'on_touch' && readerChromeVisible)
+        ? 'reader-main-chrome-pad--visible'
+        : 'reader-main-chrome-pad--hidden'
+
+  const clearReaderChromeHideTimer = useCallback(() => {
+    if (readerChromeHideTimerRef.current != null) {
+      window.clearTimeout(readerChromeHideTimerRef.current)
+      readerChromeHideTimerRef.current = null
+    }
+  }, [])
+
+  const scheduleHideReaderChrome = useCallback(() => {
+    if (useReaderStore.getState().readerNavChromeMode !== 'on_touch') return
+    clearReaderChromeHideTimer()
+    readerChromeHideTimerRef.current = window.setTimeout(() => {
+      readerChromeHideTimerRef.current = null
+      const s = useReaderStore.getState()
+      if (
+        s.showSettings ||
+        s.showMenu ||
+        s.showBookmarks ||
+        s.showSearch ||
+        s.showHighlights ||
+        s.showContextMenu
+      ) {
+        return
+      }
+      setReaderChromeVisible(false)
+    }, 3800)
+  }, [clearReaderChromeHideTimer])
+
+  useEffect(() => {
+    if (isFullscreen) return
+    if (readerNavChromeMode === 'always') {
+      clearReaderChromeHideTimer()
+      setReaderChromeVisible(true)
+    } else if (readerNavChromeMode === 'hidden') {
+      clearReaderChromeHideTimer()
+      setReaderChromeVisible(false)
+    } else {
+      scheduleHideReaderChrome()
+    }
+  }, [readerNavChromeMode, isFullscreen, clearReaderChromeHideTimer, scheduleHideReaderChrome])
+
+  const revealReaderChrome = useCallback(() => {
+    if (isFullscreen) return
+    if (useReaderStore.getState().readerNavChromeMode === 'hidden') return
+    setReaderChromeVisible(true)
+    clearReaderChromeHideTimer()
+    const s = useReaderStore.getState()
+    if (
+      s.showSettings ||
+      s.showMenu ||
+      s.showBookmarks ||
+      s.showSearch ||
+      s.showHighlights ||
+      s.showContextMenu
+    ) {
+      return
+    }
+    scheduleHideReaderChrome()
+  }, [isFullscreen, clearReaderChromeHideTimer, scheduleHideReaderChrome])
+
+  useEffect(() => {
+    return () => clearReaderChromeHideTimer()
+  }, [clearReaderChromeHideTimer])
+
+  useEffect(() => {
+    const blockingUi =
+      showSettings ||
+      showMenu ||
+      showBookmarks ||
+      showSearch ||
+      showHighlights ||
+      showContextMenu ||
+      showBookmarkNoteModal ||
+      showHighlightModal
+    if (blockingUi) {
+      if (useReaderStore.getState().readerNavChromeMode !== 'hidden') {
+        setReaderChromeVisible(true)
+      }
+      clearReaderChromeHideTimer()
+    } else if (!isFullscreen && useReaderStore.getState().readerNavChromeMode === 'on_touch') {
+      scheduleHideReaderChrome()
+    }
+  }, [
+    showSettings,
+    showMenu,
+    showBookmarks,
+    showSearch,
+    showHighlights,
+    showContextMenu,
+    showBookmarkNoteModal,
+    showHighlightModal,
+    readerNavChromeMode,
+    isFullscreen,
+    clearReaderChromeHideTimer,
+    scheduleHideReaderChrome,
+  ])
+
+  useEffect(() => {
+    const onContentInteract = () => revealReaderChrome()
+    window.addEventListener('reader-immersive-interact', onContentInteract)
+    return () => window.removeEventListener('reader-immersive-interact', onContentInteract)
+  }, [revealReaderChrome])
+
+  useEffect(() => {
+    if (isFullscreen) return
+    const onInteract = (e: Event) => {
+      const el = e.target
+      if (el instanceof Element) {
+        if (
+          el.closest(
+            '[data-reader-chrome-control], [data-reader-fab-nav], .settings-panel, .menu-container, .bookmark-panel, .search-panel, .highlight-panel, [data-reader-overlay-ui]'
+          )
+        ) {
+          return
+        }
+      }
+      revealReaderChrome()
+    }
+    window.addEventListener('touchstart', onInteract, { passive: true })
+    window.addEventListener('mousedown', onInteract, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', onInteract)
+      window.removeEventListener('mousedown', onInteract)
+    }
+  }, [isFullscreen, revealReaderChrome])
+
+  // react-reader varsayılanı 50px inset + oklar; okuma alanı maksimum olsun diye her zaman sıfır ve ok yok.
+  const maximizedReaderStyles = useMemo(
+    () => ({
       ...ReactReaderStyle,
       titleArea: {
         ...ReactReaderStyle.titleArea,
-        display: 'none'
+        display: 'none',
       },
       reader: {
         ...ReactReaderStyle.reader,
         top: 0,
         left: 0,
         right: 0,
-        bottom: 0
+        bottom: 0,
       },
       swipeWrapper: {
         ...ReactReaderStyle.swipeWrapper,
         top: 0,
         left: 0,
         right: 0,
-        bottom: 0
+        bottom: 0,
       },
-      // Tam ekranda ok butonlarını gizle
       arrow: {
         ...ReactReaderStyle.arrow,
-        display: 'none'
-      }
-    }
-  }, [isFullscreen])
-
-  const ensureReaderLayoutOverrides = useCallback((doc: Document) => {
-    const head = doc.head || doc.querySelector('head')
-    if (!head) return
-    const STYLE_ID = 'reader-layout-overrides'
-    if (!doc.getElementById(STYLE_ID)) {
-      const style = doc.createElement('style')
-      style.id = STYLE_ID
-      style.textContent = `
-        :root {
-          --reader-pad-x: 20px;
-          --reader-pad-y: 20px;
-        }
-        html, body {
-          margin: 0 !important;
-          max-width: none !important;
-        }
-        body {
-          padding: var(--reader-pad-y) var(--reader-pad-x) !important;
-          box-sizing: border-box !important;
-        }
-        /* Bazı EPUB'lar wrapper'lara margin/max-width koyuyor */
-        body * {
-          max-width: none !important;
-        }
-        
-        /* Görselleri ve SVG'leri ekran genişliğine sığdır (body * kuralını ezer) */
-        img, svg {
-          max-width: 100% !important;
-          height: auto !important;
-          object-fit: contain !important;
-        }
-        
-        /* Özel durum: SVG içindeki resimler */
-        image {
-          max-width: 100% !important;
-        }
-      `
-      head.appendChild(style)
-    }
-
-    const padX = isFullscreenRef.current ? 6 : 20
-    const padY = isFullscreenRef.current ? 10 : 20
-    doc.documentElement.style.setProperty('--reader-pad-x', `${padX}px`)
-    doc.documentElement.style.setProperty('--reader-pad-y', `${padY}px`)
-  }, [])
-
-  /** EPUB iframe içinde tema; tek style#reader-theme-styles — CSS imzası aynıysa string önbellekten. */
-  const injectReaderThemeStyles = useCallback((doc: Document, surface: ReaderSurfaceTheme) => {
-    const head = doc.head || doc.querySelector('head')
-    if (!head) return
-    const READER_THEME_STYLE_ID = 'reader-theme-styles'
-    const tr = trColorRef.current
-    const ar = arColorRef.current
-    const fa = faColorRef.current
-    const idTr = readerFontIdTrRef.current
-    const idAr = readerFontIdArRef.current
-    const wTr = readerWeightTrRef.current
-    const wAr = readerWeightArRef.current
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-    const sig = `${tr}\0${ar}\0${fa}\0${idTr}\0${idAr}\0${wTr}\0${wAr}\0${origin}`
-    let cache = readerThemeCssCacheRef.current
-    if (!cache || cache.sig !== sig) {
-      const defTr = getReaderFontDefTr(idTr)
-      const defAr = getReaderFontDefAr(idAr)
-      const faceCss = collectFontFaces(origin, [defTr, defAr])
-      let familyTr: string = defTr.fallbacks
-      if (defTr.file && defTr.face && origin) {
-        familyTr = `'${defTr.face}', ${defTr.fallbacks}`
-      }
-      let familyAr: string = defAr.fallbacks
-      if (defAr.file && defAr.face && origin) {
-        familyAr = `'${defAr.face}', ${defAr.fallbacks}`
-      }
-      cache = {
-        sig,
-        light: buildReaderThemeCss('light', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss),
-        sepia: buildReaderThemeCss('sepia', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss),
-        dark: buildReaderThemeCss('dark', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss),
-        oled: buildReaderThemeCss('oled', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss)
-      }
-      readerThemeCssCacheRef.current = cache
-    }
-    const css = cache[surface]
-    let el = doc.getElementById(READER_THEME_STYLE_ID) as HTMLStyleElement | null
-    if (!el) {
-      el = doc.createElement('style')
-      el.id = READER_THEME_STYLE_ID
-      head.appendChild(el)
-    }
-    if (el.textContent !== css) {
-      el.textContent = css
-    }
-    // EPUB içi stiller sonradan eklenebiliyor; aynı özgüllükte son kazansın diye style'ı head sonuna al.
-    try {
-      if (el.parentNode === head && head.lastElementChild !== el) {
-        head.appendChild(el)
-      }
-    } catch { /* ignore */ }
-  }, [])
-
-  const syncReaderThemeToIframes = useCallback(
-    (surface: ReaderSurfaceTheme) => {
-      const seen = new Set<Document>()
-      const injectOne = (d: Document | null | undefined) => {
-        if (!d?.head || seen.has(d)) return
-        seen.add(d)
-        try {
-          injectReaderThemeStyles(d, surface)
-        } catch { /* cross-origin veya kapalı belge */ }
-      }
-      contentDocsRef.current.forEach((doc) => injectOne(doc))
-      document.querySelectorAll<HTMLIFrameElement>('.react-reader-container iframe').forEach((iframe) => {
-        try {
-          injectOne(iframe.contentDocument || iframe.contentWindow?.document || null)
-        } catch { }
-      })
-    },
-    [injectReaderThemeStyles]
+        display: 'none',
+      },
+    }),
+    []
   )
 
-  // Hedef: içerik scroll olmasın; sayfalar "paginated" olarak ileri/geri gitsin.
-  const applyReaderInsets = useCallback(() => {
-    const surface = resolveReaderSurface(readingAppearanceRef.current, isDarkModeRef.current)
-    const seen = new Set<Document>()
-    const applyOne = (doc: Document | null | undefined) => {
-      if (!doc?.head || !doc.body || seen.has(doc)) return
-      seen.add(doc)
-      try {
-        ensureReaderLayoutOverrides(doc)
-        injectReaderThemeStyles(doc, surface)
-        doc.documentElement.style.overflow = 'hidden'
-        doc.body.style.overflow = 'hidden'
-      } catch { }
-    }
-    contentDocsRef.current.forEach((doc) => applyOne(doc))
 
-    document.querySelectorAll<HTMLIFrameElement>('.react-reader-container iframe').forEach((iframe) => {
-      try {
-        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
-        if (!iframeDoc?.body) return
-        contentDocsRef.current.add(iframeDoc)
-        applyOne(iframeDoc)
-      } catch (error) {
-        console.log('reader inset uygulama hatası:', error)
-      }
-    })
-  }, [ensureReaderLayoutOverrides, injectReaderThemeStyles])
-
-  // Sayfa bilgileri için yeni state'ler
-  const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(0)
-  const [pageInput, setPageInput] = useState<string>('')
-  const [currentChapter, setCurrentChapter] = useState('')
-  const [toc, setToc] = useState<any[]>([])
-  const [lastSelectedText, setLastSelectedText] = useState<string>('')
+  const currentChapterRef = useRef('')
+  currentChapterRef.current = currentChapter
 
   const flatToc = useMemo(() => {
     const result: any[] = []
@@ -439,6 +600,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       if (r?.themes?.fontSize) {
         r.themes.fontSize(`${useReaderStore.getState().fontSize}%`)
       }
+      // Font % / ailesi değişince sütun sayfalama yeniden hesaplanmazsa içerik kaybolur veya bembeyaz kalır.
+      if (typeof r?.resize === 'function') {
+        r.resize()
+      }
     } catch { /* ignore */ }
   }, [
     trColor,
@@ -450,6 +615,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     readerWeightAr,
     readingAppearance,
     fontSize,
+    readerMarginPresetIndex,
+    isFullscreen,
     applyReaderInsets,
   ])
 
@@ -507,7 +674,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
 
     document.addEventListener('mousedown', handlePointerOutside)
-    document.addEventListener('touchstart', handlePointerOutside)
+    document.addEventListener('touchstart', handlePointerOutside, { passive: true })
     return () => {
       document.removeEventListener('mousedown', handlePointerOutside)
       document.removeEventListener('touchstart', handlePointerOutside)
@@ -541,18 +708,20 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [showSettings, showBookmarks, showMenu, showHighlights, showContextMenu, showSearch])
 
-  // Timeout için yükleme kontrolü
+  // Timeout: büyük EPUB’lar veya yavaş ağda getRendition gecikebilir; kısa süre yanlış "indirilemedi" vermesin.
   useEffect(() => {
+    if (!isLoading) return
+    const timeoutMs = 120000
     const timeout = setTimeout(() => {
       if (isLoading) {
-        console.error('EPUB yükleme timeout')
+        console.error('EPUB yükleme timeout', timeoutMs, 'ms')
         setError(t('reader.downloadError'))
         setIsLoading(false)
       }
-    }, 15000) // 15 saniye timeout
+    }, timeoutMs)
 
     return () => clearTimeout(timeout)
-  }, [isLoading])
+  }, [isLoading, t])
 
   // "Sistem" ön ayarı: uygulama koyu/açık değişince okuma yüzeyi de light/dark olur
   useEffect(() => {
@@ -562,10 +731,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       try {
         renditionRef.current.themes.select(surface)
       } catch { /* ignore */ }
-      setTimeout(() => syncReaderThemeToIframes(surface), 100)
-    } else {
-      setTimeout(() => syncReaderThemeToIframes(surface), 100)
     }
+    // Hemen uygula (inline bg zaten ensureReaderLayoutOverrides'dan geliyor)
+    // + bir rAF sonrası tekrar: epubjs themes.select() async tamamlanmış olur
+    syncReaderThemeToIframes(surface)
+    const raf = requestAnimationFrame(() => syncReaderThemeToIframes(surface))
+    return () => cancelAnimationFrame(raf)
   }, [isDarkMode, readingAppearance, syncReaderThemeToIframes])
 
   // Gelişmiş ilerleme hesaplama fonksiyonu
@@ -735,6 +906,18 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               console.warn('reader-theme-styles inject:', injectErr)
             }
 
+            if (isIOS) {
+              const frameEl = doc.defaultView?.frameElement as HTMLIFrameElement | null
+              if (frameEl) {
+                const scheduleIosSelection = () => {
+                  if (suppressNextSelectionRef.current) return
+                  requestAnimationFrame(() => processIosIframeSelectionRef.current(frameEl))
+                }
+                doc.addEventListener('selectionchange', scheduleIosSelection)
+                doc.addEventListener('touchend', scheduleIosSelection, { passive: true })
+              }
+            }
+
             const head = doc.querySelector('head')
             const TOUCH_SELECT_STYLE_ID = 'reader-touch-select-overrides'
             if (head && !doc.getElementById(TOUCH_SELECT_STYLE_ID)) {
@@ -765,13 +948,20 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
             // EPUB içeriğinde herhangi bir dokunuşta açık context menüyü kapat
             // (özellikle mobilde text selection handle'larına dokunulduğunda)
+            // iframe olayları parent window'a bubble olmaz; immersive chrome için sinyal gönder
+            const notifyImmersiveInteract = () => {
+              window.dispatchEvent(new CustomEvent('reader-immersive-interact'))
+            }
             doc.addEventListener('touchstart', () => {
               setShowContextMenu(false)
               setPendingHighlight(null)
-            })
+              notifyImmersiveInteract()
+            }, { passive: true })
+            doc.addEventListener('mousedown', notifyImmersiveInteract)
 
             // Mobil veya Dokunmatik Cihazlarda:
             // - Seçim değiştiği anda context menüyü kapat
+            // - İki parmak pinch ile font (rAF ile akıcı; parmak kalkınca kalıcı kayıt)
             // - Tam ekranda swipe/tap hareketlerini yönet
             if (isMobile || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)) {
               doc.addEventListener('selectionchange', () => {
@@ -780,6 +970,84 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 setPendingHighlight(null)
               })
 
+              const PINCH_SENSITIVITY = 1.68
+              const PINCH_DISPLAY_BLEND = 0.38
+              const pinchTouchDistance = (touches: TouchList) => {
+                if (touches.length < 2) return 0
+                const a = touches[0]
+                const b = touches[1]
+                return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+              }
+
+              const schedulePinchFontRaf = () => {
+                if (pinchRafScheduledRef.current) return
+                pinchRafScheduledRef.current = true
+                pinchRafIdRef.current = requestAnimationFrame(() => {
+                  pinchRafScheduledRef.current = false
+                  pinchRafIdRef.current = null
+                  const sz = pinchPendingFontRef.current
+                  if (sz == null || !renditionRef.current?.themes?.fontSize) return
+                  try {
+                    renditionRef.current.themes.fontSize(`${sz}%`)
+                  } catch { /* ignore */ }
+                })
+              }
+
+              const commitPinchFontSize = () => {
+                if (!pinchGestureActiveRef.current) return
+                pinchGestureActiveRef.current = false
+                if (pinchRafIdRef.current != null) {
+                  cancelAnimationFrame(pinchRafIdRef.current)
+                  pinchRafIdRef.current = null
+                }
+                pinchRafScheduledRef.current = false
+                const pending = pinchPendingFontRef.current
+                pinchPendingFontRef.current = null
+                const base = useReaderStore.getState().fontSize
+                const finalSize = pending != null ? pending : base
+                const clamped = Math.max(50, Math.min(200, Math.round(finalSize)))
+                useReaderStore.getState().setFontSize(clamped)
+                if (renditionRef.current?.themes?.fontSize) {
+                  try {
+                    renditionRef.current.themes.fontSize(`${clamped}%`)
+                  } catch { /* ignore */ }
+                }
+              }
+
+              const handlePinchTouchStart = (e: TouchEvent) => {
+                if (e.touches.length === 2) {
+                  void triggerReaderHaptic('light')
+                  pinchGestureActiveRef.current = true
+                  pinchInitialDistanceRef.current = Math.max(28, pinchTouchDistance(e.touches))
+                  pinchBaseFontRef.current = useReaderStore.getState().fontSize
+                  pinchPendingFontRef.current = pinchBaseFontRef.current
+                }
+              }
+
+              const handlePinchTouchMove = (e: TouchEvent) => {
+                if (!pinchGestureActiveRef.current || e.touches.length < 2) return
+                const d0 = pinchInitialDistanceRef.current
+                if (d0 < 1) return
+                const d1 = pinchTouchDistance(e.touches)
+                const ratioRaw = d1 / d0
+                const shaped =
+                  Math.sign(ratioRaw - 1) * Math.pow(Math.min(4, Math.abs(ratioRaw - 1)), 0.9) + 1
+                const adjusted = 1 + (shaped - 1) * PINCH_SENSITIVITY
+                const rawNext = Math.round(pinchBaseFontRef.current * adjusted)
+                const prevDisp = pinchPendingFontRef.current ?? pinchBaseFontRef.current
+                let next = Math.round(prevDisp * (1 - PINCH_DISPLAY_BLEND) + rawNext * PINCH_DISPLAY_BLEND)
+                next = Math.max(50, Math.min(200, next))
+                if (next === pinchPendingFontRef.current) return
+                pinchPendingFontRef.current = next
+                schedulePinchFontRaf()
+                try {
+                  if (e.cancelable) e.preventDefault()
+                } catch { /* ignore */ }
+              }
+
+              doc.addEventListener('touchstart', handlePinchTouchStart, { passive: true })
+              doc.addEventListener('touchmove', handlePinchTouchMove, { passive: false })
+
               // Tam ekranda içerik üzerinde yatay swipe ve tap ile sayfa değiştir
               let touchStartX: number | null = null
               let touchStartY: number | null = null
@@ -787,6 +1055,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
               const handleSwipeStart = (e: TouchEvent) => {
                 if (!isFullscreenRef.current) return
+                if (e.touches.length >= 2) {
+                  touchStartX = null
+                  touchStartY = null
+                  touchStartTime = null
+                  return
+                }
                 try {
                   const touch = e.touches[0]
                   if (!touch) return
@@ -797,6 +1071,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               }
 
               const handleSwipeEnd = (e: TouchEvent) => {
+                if (pinchGestureActiveRef.current && e.touches.length < 2) {
+                  commitPinchFontSize()
+                  touchStartX = null
+                  touchStartY = null
+                  touchStartTime = null
+                  return
+                }
+
                 if (!isFullscreenRef.current) return
 
                 const startX = touchStartX
@@ -887,8 +1169,18 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 } catch { }
               }
 
+              const handleTouchCancel = (e: TouchEvent) => {
+                if (pinchGestureActiveRef.current && e.touches.length < 2) {
+                  commitPinchFontSize()
+                }
+                touchStartX = null
+                touchStartY = null
+                touchStartTime = null
+              }
+
               doc.addEventListener('touchstart', handleSwipeStart, { passive: true })
               doc.addEventListener('touchend', handleSwipeEnd, { passive: false })
+              doc.addEventListener('touchcancel', handleTouchCancel, { passive: true })
             }
           } catch (err) {
             console.log('EPUB content hook hatası:', err)
@@ -1024,9 +1316,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             androidSelectionTimeoutRef.current = window.setTimeout(() => {
               // Son timeout çalışırken, highlight bilgisi hâlâ geçerliyse menüyü göster
               try {
-                if (haptics) {
-                  haptics.impact({ style: 'light' }).catch(() => { })
-                }
+                void triggerReaderHaptic('light')
               } catch { }
               computeAndShowMenu()
               androidSelectionTimeoutRef.current = null
@@ -1034,9 +1324,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           } else if (!isMobile) {
             // Desktop/Web: hemen göster, haptics varsa çalıştır
             try {
-              if (haptics) {
-                haptics.impact({ style: 'light' }).catch(() => { })
-              }
+              void triggerReaderHaptic('light')
             } catch { }
             computeAndShowMenu()
           }
@@ -1056,7 +1344,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         background: '#ffffff',
         'font-family': SYSTEM_FONT_STACK,
         'line-height': '1.6',
-        'padding': '20px',
+        'padding': '0',
         'margin': '0',
       },
       'p, div, span, section, article': {
@@ -1069,7 +1357,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       },
       'html, body': {
         'background-color': '#ffffff',
-        color: '#1f2937'
+        color: '#1f2937',
+        'margin': '0',
+        'padding': '0',
       }
     })
 
@@ -1079,7 +1369,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         background: '#0f172a',
         'font-family': SYSTEM_FONT_STACK,
         'line-height': '1.6',
-        'padding': '20px',
+        'padding': '0',
         'margin': '0',
       },
       'p, div, span, section, article': {
@@ -1092,7 +1382,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       },
       'html, body': {
         'background-color': '#0f172a',
-        color: '#e5e7eb'
+        color: '#e5e7eb',
+        'margin': '0',
+        'padding': '0',
       }
     })
 
@@ -1102,7 +1394,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         background: '#f4ecd8',
         'font-family': SYSTEM_FONT_STACK,
         'line-height': '1.6',
-        'padding': '20px',
+        'padding': '0',
         'margin': '0',
       },
       'p, div, span, section, article': {
@@ -1115,7 +1407,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       },
       'html, body': {
         'background-color': '#f4ecd8',
-        color: '#3e2723'
+        color: '#3e2723',
+        'margin': '0',
+        'padding': '0',
       }
     })
 
@@ -1125,7 +1419,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         background: '#000000',
         'font-family': SYSTEM_FONT_STACK,
         'line-height': '1.6',
-        'padding': '20px',
+        'padding': '0',
         'margin': '0',
       },
       'p, div, span, section, article': {
@@ -1138,30 +1432,54 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       },
       'html, body': {
         'background-color': '#000000',
-        color: '#e5e5e5'
+        color: '#e5e5e5',
+        'margin': '0',
+        'padding': '0',
       }
     })
 
-    // Tam ekranda ekranın sağına/soluna tıklayarak sayfa değiştirme
+    // ── Rendered Observer ──────────────────────────────────────────────────────
+    // Her spine item render edildiğinde (sayfa çevirme dahil) tetiklenir.
+    // querySelector'a gerek kalmadan contentDocsRef'i güncel tutar.
+    try {
+      rendition.on('rendered', (_section: unknown, view: any) => {
+        try {
+          // epubjs view nesnesinin belge referansı farklı versiyonlarda farklı isimde olabilir
+          const doc: Document | undefined =
+            view?.document ??
+            view?.contents?.document ??
+            (view?.iframe as HTMLIFrameElement | undefined)?.contentDocument ??
+            undefined
+          if (!doc?.head || !doc.body) return
+          contentDocsRef.current.add(doc)
+          const surface = resolveReaderSurface(readingAppearanceRef.current, isDarkModeRef.current)
+          ensureReaderLayoutOverrides(doc)
+          injectReaderThemeStyles(doc, surface)
+          doc.documentElement.style.overflow = 'hidden'
+          doc.body.style.overflow = 'hidden'
+        } catch { /* cross-origin veya kapalı belge */ }
+      })
+    } catch (err) {
+      console.log('Rendition rendered handler eklenemedi:', err)
+    }
+
+    // EasyReach: dikey scroll kapalıyken; kenar dokunuşu ayarla; sol %20 / sağ %25 / orta menü
     try {
       rendition.on('click', (event: any) => {
         try {
-          // Sadece tam ekran modunda çalışsın
-          if (!isFullscreenRef.current) return
+          const st = useReaderStore.getState()
+          if (st.scrollMode) return
 
           const target = event?.target as HTMLElement | null
 
-          // Metin seçimi varken sayfa değiştirme (örneğin selection'ı düzeltmek isterken) tetiklenmesin
           if (hasActiveTextSelection()) return
 
-          // Link, buton vb. etkileşimli elementlere tıklamayı bozma
           if (target) {
             if (target.closest('a, button, input, textarea, select, label')) {
               return
             }
           }
 
-          // Tıklamanın konumuna göre yön belirle
           const view = (event?.view as Window | undefined) || target?.ownerDocument?.defaultView || window
           const localWindow = view || window
           const width = localWindow.innerWidth || window.innerWidth
@@ -1172,15 +1490,20 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           if (!width || clientX == null) return
 
           const ratio = clientX / width
+          const edgeTap = st.readerEdgeTapEnabled
 
-          // Sol 1/3: önceki sayfa, sağ 1/3: sonraki sayfa
-          if (ratio < 0.33) {
+          if (ratio < 0.2) {
+            if (!edgeTap) return
             goToPrevious()
-          } else if (ratio > 0.66) {
+          } else if (ratio > 0.75) {
+            if (!edgeTap) return
             goToNext()
+          } else {
+            useReaderStore.getState().setShowMenu(true)
+            window.dispatchEvent(new CustomEvent('reader-immersive-interact'))
           }
         } catch (clickErr) {
-          console.log('Fullscreen click navigation error:', clickErr)
+          console.log('EasyReach click navigation error:', clickErr)
         }
       })
     } catch (err) {
@@ -1374,9 +1697,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                                 setShowHighlights(true)
 
                                 // Haptic feedback
-                                if (haptics) {
-                                  haptics.impact({ style: 'light' }).catch(() => { })
-                                }
+                                void triggerReaderHaptic('light')
                               })
 
                               fragment.appendChild(span)
@@ -1447,9 +1768,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                                   setShowHighlights(true)
 
                                   // Haptic feedback
-                                  if (haptics) {
-                                    haptics.impact({ style: 'light' }).catch(() => { })
-                                  }
+                                  void triggerReaderHaptic('light')
                                 })
 
                                 fragment.appendChild(span)
@@ -1575,13 +1894,21 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
     // Debug log for location change
     console.log('Location changed:', {
-      previous: location,
+      previous: useReaderStore.getState().epubLocation,
       new: epubcifi,
       currentChapter,
       progressPercentage
     })
 
-    setLocation(epubcifi)
+    setEpubLocation(epubcifi)
+
+    if (
+      lastLocationRef.current &&
+      lastLocationRef.current !== 0 &&
+      String(lastLocationRef.current) !== String(epubcifi)
+    ) {
+      void triggerReaderHaptic('light')
+    }
 
     // YENİ: Tekrarlanan sayfa kaydını önlemek için debounce
     // Eğer aynı konumu tekrar kaydediyorsak ve son kayıt üzerinden 2 saniye geçmediyse kaydetme
@@ -1748,9 +2075,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   }
 
   const showToastMessage = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
-    setShowToast({ message, type })
-    setTimeout(() => setShowToast(null), 3000)
+    setReaderToast({ message, type })
+    setTimeout(() => setReaderToast(null), 3000)
   }
+
 
   // Seçimleri temizle ve kısa süreli selection event'lerini bastır
   const clearSelectionsAndSuppress = (suppressMs: number = 500) => {
@@ -2025,9 +2353,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         setShowHighlights(false)
 
         // Haptic feedback (iOS için)
-        if (haptics) {
-          haptics.impact({ style: 'light' }).catch(() => { })
-        }
+        void triggerReaderHaptic('light')
 
       } catch (error) {
         console.error('Highlight navigation genel hatası:', error)
@@ -2048,7 +2374,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     setShowHighlightModal(true)
   }
 
-  // EPUB doğrudan URL ile açılır (blob indirme yok); epub.js parça parça okur.
+  // EPUB: blob/ObjectURL yok. Paketli `.epub` → epub.js tüm zip’i indirir; `epubUnpackedBaseUrl`
+  // ile açılmış kök verilirse bölümler HTTP ile ayrı ayrı yüklenir (daha düşük açılış/RAM).
+  // Sadece gerçek kaynak değişince yükleme başlat; `t` dependency’de yok (dil değişince overlay/reader kilitlenmesin).
   useEffect(() => {
     if (!displayUrl) {
       setError(t('reader.invalidUrl'))
@@ -2057,7 +2385,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
     setIsLoading(true)
     setError(null)
-  }, [displayUrl, bookUrl, t])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- yalnızca displayUrl (çeviri metni displayUrl ile güncellenir)
+  }, [displayUrl])
 
   useEffect(() => {
     contentDocsRef.current.clear()
@@ -2148,48 +2477,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
   }, [initialLocation, isLoading, highlights])
 
-  const goToNext = () => {
-    if (renditionRef.current) {
-      renditionRef.current.next()
-    }
-  }
-
-  const goToPrevious = () => {
-    if (renditionRef.current) {
-      renditionRef.current.prev()
-    }
-  }
-
-  const goToPage = (page: number) => {
-    if (!renditionRef.current || !page) return
-
-    try {
-      const book = (renditionRef.current as any).book
-      const locations = book?.locations
-
-      if (!locations || typeof locations.length !== 'function' || !locations.length()) {
-        return
-      }
-
-      const total = locations.length()
-      if (!total || isNaN(total)) return
-
-      const clampedPage = Math.max(1, Math.min(total, Math.floor(page)))
-      const percentage = (clampedPage - 0.5) / total
-
-      const cfi =
-        typeof locations.cfiFromPercentage === 'function'
-          ? locations.cfiFromPercentage(percentage)
-          : null
-
-      if (cfi) {
-        renditionRef.current.display(cfi)
-      }
-    } catch (error) {
-      console.error('Sayfaya gitme hatası:', error)
-    }
-  }
-
   const submitPageInput = () => {
     const value = parseInt(pageInput, 10)
     if (!isNaN(value)) {
@@ -2258,43 +2545,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
   }, [goToNext, goToPrevious, hasActiveTextSelection])
 
-  const applyReadingAppearancePreset = useCallback(
-    (preset: ReaderAppearancePreset) => {
-      readingAppearanceRef.current = preset
-      useReaderStore.getState().setReadingAppearance(preset)
-
-      if (setDarkMode) {
-        if (preset === 'light' || preset === 'sepia') setDarkMode(false)
-        else if (preset === 'dark' || preset === 'oled') setDarkMode(true)
-      }
-
-      const surface: ReaderSurfaceTheme =
-        preset === 'system'
-          ? resolveReaderSurface('system', isDarkModeRef.current)
-          : preset
-      if (renditionRef.current) {
-        try {
-          renditionRef.current.themes.select(surface)
-        } catch { /* ignore */ }
-        setTimeout(() => syncReaderThemeToIframes(surface), 100)
-      } else {
-        setTimeout(() => syncReaderThemeToIframes(surface), 100)
-      }
-    },
-    [setDarkMode, syncReaderThemeToIframes]
-  )
-
-  const changeFontSize = useCallback((newSize: number) => {
-    useReaderStore.getState().setFontSize(newSize)
-    if (renditionRef.current) {
-      renditionRef.current.themes.fontSize(`${newSize}%`)
-    }
-  }, [])
-
   const resetReader = () => {
     if (renditionRef.current) {
       renditionRef.current.display()
       setProgressPercentage(0)
+      setEpubLocation(0)
     }
   }
 
@@ -2307,7 +2562,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     try {
       if (isBookmarked) {
         // Mevcut bookmark'ı sil
-        const currentBookmark = bookmarks.find(b => b.location === location)
+        const currentBookmark = bookmarks.find(b => b.location === epubLocation)
         if (currentBookmark) {
           await deleteBookmark(currentBookmark.id)
           setBookmarks(bookmarks.filter(b => b.id !== currentBookmark.id))
@@ -2315,7 +2570,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         }
       } else {
         // Bookmark not ekleme modalını aç
-        setPendingBookmarkLocation(location as string)
+        setPendingBookmarkLocation(epubLocation as string)
         setShowBookmarkNoteModal(true)
       }
     } catch (error) {
@@ -2511,7 +2766,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       setBookmarks(bookmarks.filter(b => b.id !== bookmark.id))
 
       // Eğer silinen bookmark mevcut konumda ise bookmark durumunu güncelle
-      if (bookmark.location === location) {
+      if (bookmark.location === epubLocation) {
         setIsBookmarked(false)
       }
     } catch (error) {
@@ -2658,11 +2913,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         return
       }
 
-      setSearchQuery((prev) => {
-        if (!prev) return text
-        // Sonuna ekleyelim, araya boşluk koyarak
-        return `${prev.trim()} ${text}`
-      })
+      appendSearchQuery(text)
     } catch (err) {
       console.log('handlePasteIntoSearch hatası:', err)
       showToastMessage(t('reader.toasts.copyError'), 'error')
@@ -2953,250 +3204,157 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     return () => window.removeEventListener('resize', handleResize)
   }, [applyReaderInsets])
 
-  const epubInitOptions = useMemo(() => ({
-    openAs: 'epub',
-    flow: scrollMode ? 'scrolled' : 'paginated',
-    manager: 'default',
-    spread: 'none',
-    width: '100%',
-    height: '100%',
+  const epubInitOptions = useMemo(
+    () => ({
+      // Sadece `.epub` zip’inde zorunlu; açılmış klasör URL’sinde epub.js `openContainer` ile
+      // META-INF/container.xml ve sonrasında yalnız ihtiyaç duyulan spine dosyalarını ister.
+      ...(packedEpub ? { openAs: 'epub' as const } : {}),
+      flow: scrollMode ? 'scrolled' : 'paginated',
+      manager: 'default',
+      spread: 'none',
+      width: '100%',
+      height: '100%',
 
-    allowScriptedContent: true,
-  }), [scrollMode])
+      allowScriptedContent: true,
+    }),
+    [scrollMode, packedEpub]
+  )
 
-  // iOS için ek text selection handling (polling tabanlı, native menü devre dışıyken daha stabil)
+  const scanIosIframesForSelection = useCallback((): boolean => {
+    const iframes = document.querySelectorAll('.react-reader-container iframe')
+    for (let i = 0; i < iframes.length; i++) {
+      try {
+        const doc = (iframes[i] as HTMLIFrameElement).contentDocument
+        const t = doc?.getSelection()?.toString().trim()
+        if (t) return true
+      } catch { /* ignore */ }
+    }
+    return false
+  }, [])
+
+  // iOS: seçim — selectionchange + rAF (setInterval yerine olay güdümlü)
+  useLayoutEffect(() => {
+    processIosIframeSelectionRef.current = (iframe: HTMLIFrameElement) => {
+      if (suppressNextSelectionRef.current) return
+      const store = useReaderStore.getState()
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
+        if (!iframeDoc) return
+        const selection = iframeDoc.getSelection()
+        if (!selection) return
+        const selectedText = selection.toString().trim()
+
+        if (!selectedText) {
+          if (!scanIosIframesForSelection() && store.showContextMenu) {
+            store.setShowContextMenu(false)
+            setPendingHighlight(null)
+          }
+          return
+        }
+
+        const now = Date.now()
+        if (selectedText !== iosLastSelectionTextRef.current) {
+          iosLastSelectionTextRef.current = selectedText
+          iosLastSelectionChangeTimeRef.current = now
+          iosMenuShownForSelectionRef.current = false
+          if (store.showContextMenu) store.setShowContextMenu(false)
+        }
+
+        const isStable = now - iosLastSelectionChangeTimeRef.current > 260
+        if (iosIsTouchSelectingRef.current || !isStable || iosMenuShownForSelectionRef.current) {
+          return
+        }
+
+        let range: Range
+        try {
+          range = selection.getRangeAt(0)
+        } catch {
+          return
+        }
+
+        let cfiRange = ''
+        const loc = renditionRef.current?.location
+        if (loc?.start?.cfi) {
+          cfiRange = `${loc.start.cfi}:${range.startOffset},${range.endOffset}`
+        } else {
+          cfiRange = `epubcfi(/6/0):${range.startOffset},${range.endOffset}`
+        }
+
+        const chapterTitle = currentChapterRef.current || ''
+        setPendingHighlight({ cfiRange, selectedText, chapterTitle })
+        setLastSelectedText(selectedText)
+
+        try {
+          const rect = range.getBoundingClientRect()
+          if (rect) {
+            let x = rect.left + rect.width / 2
+            const isMobileView = window.innerWidth < 768
+            const estimatedMenuHeight = isMobileView ? 240 : 264
+            const padding = 10
+            let y = rect.bottom + padding
+            const iframeRect = iframe.getBoundingClientRect()
+            const globalY = iframeRect.top + y
+            if (globalY + estimatedMenuHeight > window.innerHeight - 10) {
+              y = rect.top - estimatedMenuHeight - padding
+              if (iframeRect.top + y < 10) {
+                y = 10 - iframeRect.top
+              }
+            }
+            x = iframeRect.left + x
+            y = iframeRect.top + y
+            store.setContextMenuPosition({ x, y })
+          } else {
+            store.setContextMenuPosition({
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 2
+            })
+          }
+        } catch (posErr) {
+          console.log('iOS selection pozisyon hatası:', posErr)
+          store.setContextMenuPosition({
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2
+          })
+        }
+
+        void triggerReaderHaptic('light')
+        store.setShowContextMenu(true)
+        iosMenuShownForSelectionRef.current = true
+      } catch (err) {
+        console.log('iOS selection handler hatası:', err)
+      }
+    }
+  }, [scanIosIframesForSelection])
+
   useEffect(() => {
     const isIOS =
       typeof navigator !== 'undefined' &&
       (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
-
     if (!isIOS) return
 
-    console.log('iOS selection polling handler aktif')
-
-    let pollId: number | null = null
-    let touchListenersAttached = false
-
-    const pollSelection = () => {
-      if (suppressNextSelectionRef.current) {
-        return
-      }
-
-      try {
-        let hasAnySelection = false
-
-        const iframes = document.querySelectorAll(
-          '.react-reader-container iframe'
-        )
-        iframes.forEach((iframe: any) => {
-          try {
-            const iframeDoc =
-              iframe.contentDocument || iframe.contentWindow?.document
-            if (!iframeDoc) return
-
-            const selection = iframeDoc.getSelection()
-            if (!selection) return
-
-            const selectedText = selection.toString().trim()
-            if (!selectedText) return
-
-            hasAnySelection = true
-
-            const now = Date.now()
-
-            // Seçim metni değiştiyse, zaman damgasını güncelle ve bu seçim için menünün
-            // henüz gösterilmediğini işaretle. Ayrıca, varsa mevcut menüyü gizle ki
-            // kullanıcı selector'ı sürüklerken context menü pasif olsun.
-            if (selectedText !== iosLastSelectionTextRef.current) {
-              iosLastSelectionTextRef.current = selectedText
-              iosLastSelectionChangeTimeRef.current = now
-              iosMenuShownForSelectionRef.current = false
-
-              if (showContextMenu) {
-                setShowContextMenu(false)
-              }
-            }
-
-            const isStable =
-              now - iosLastSelectionChangeTimeRef.current > 260
-
-            // Parmağı hâlâ ekrandayken veya seçim stabil değilse ya da
-            // bu seçim için menü zaten gösterildiyse, hiçbir şey yapma
-            if (
-              iosIsTouchSelectingRef.current ||
-              !isStable ||
-              iosMenuShownForSelectionRef.current
-            ) {
-              return
-            }
-
-            console.log('iOS polling selection detected:', selectedText)
-
-            let range: Range
-            try {
-              range = selection.getRangeAt(0)
-            } catch {
-              return
-            }
-
-            // CFI range yaklaşık olarak mevcut konum + offsetler ile oluşturulur
-            let cfiRange = ''
-            const loc = renditionRef.current?.location
-            if (loc?.start?.cfi) {
-              cfiRange = `${loc.start.cfi}:${range.startOffset},${range.endOffset}`
-            } else {
-              cfiRange = `epubcfi(/6/0):${range.startOffset},${range.endOffset}`
-            }
-
-            const chapterTitle = currentChapter || ''
-
-            setPendingHighlight({
-              cfiRange,
-              selectedText,
-              chapterTitle
-            })
-            setLastSelectedText(selectedText)
-
-            // Context menü pozisyonu: seçimin altı + iframe offset'i (alta sığmazsa üstüne)
-            try {
-              const rect = range.getBoundingClientRect()
-              if (rect) {
-                let x = rect.left + rect.width / 2
-                const isMobileView = window.innerWidth < 768
-                const estimatedMenuHeight = isMobileView ? 240 : 264
-                const padding = 10
-
-                // Önce seçimin altına yerleştirmeyi dene
-                let y = rect.bottom + padding
-
-                const iframeRect =
-                  (iframe as HTMLIFrameElement).getBoundingClientRect()
-                let globalY = iframeRect.top + y
-
-                // Eğer ekranın altına taşacaksa, seçimin üstüne yerleştir
-                if (globalY + estimatedMenuHeight > window.innerHeight - 10) {
-                  y = rect.top - estimatedMenuHeight - padding
-                  // Eğer hala üst kenara çok yakınsa, minimum padding bırak
-                  if (iframeRect.top + y < 10) {
-                    y = 10 - iframeRect.top
-                  }
-                }
-
-                x = iframeRect.left + x
-                y = iframeRect.top + y
-                setContextMenuPosition({ x, y })
-              } else {
-                setContextMenuPosition({
-                  x: window.innerWidth / 2,
-                  y: window.innerHeight / 2
-                })
-              }
-            } catch (posErr) {
-              console.log('iOS polling selection pozisyon hatası:', posErr)
-              setContextMenuPosition({
-                x: window.innerWidth / 2,
-                y: window.innerHeight / 2
-              })
-            }
-
-            // Haptic feedback
-            if (haptics) {
-              haptics.impact({ style: 'light' }).catch(() => { })
-            }
-
-            setShowContextMenu(true)
-            iosMenuShownForSelectionRef.current = true
-          } catch (err) {
-            console.log('iOS polling selection genel hatası:', err)
-          }
-        })
-
-        // Hiçbir iframe'de seçim kalmadıysa ve context menü açıksa, otomatik kapat
-        if (!hasAnySelection && showContextMenu) {
-          console.log('iOS polling: seçim temizlenmiş, context menü kapatılıyor')
-          setShowContextMenu(false)
-          setPendingHighlight(null)
-        }
-      } catch (err) {
-        console.log('iOS polling selection dış hata:', err)
-      }
-    }
-
-    // Dokunma event'lerini dinleyerek seçim sırasında menünün açılmasını engelle
     const handleTouchStart = () => {
       iosIsTouchSelectingRef.current = true
-      // Yeni bir seçim için menüyü tekrar gösterebilmek adına flag'i sıfırla
       iosMenuShownForSelectionRef.current = false
     }
 
     const handleTouchEnd = () => {
-      // Parmağın ekrandan kalktığını işaretle; bir sonraki stabil seçimde menü açılabilir
       iosIsTouchSelectingRef.current = false
-    }
-
-    const attachTouchListeners = () => {
-      if (touchListenersAttached) return
-      touchListenersAttached = true
-
-      document.addEventListener('touchstart', handleTouchStart, {
-        passive: true
-      })
-      document.addEventListener('touchend', handleTouchEnd, {
-        passive: true
-      })
-
-      const iframes = document.querySelectorAll(
-        '.react-reader-container iframe'
-      )
-      iframes.forEach((iframe: any) => {
-        try {
-          const iframeDoc =
-            iframe.contentDocument || iframe.contentWindow?.document
-          if (iframeDoc) {
-            iframeDoc.addEventListener('touchstart', handleTouchStart, {
-              passive: true
-            })
-            iframeDoc.addEventListener('touchend', handleTouchEnd, {
-              passive: true
-            })
-          }
-        } catch (err) {
-          console.log('iOS iframe touch listener ekleme hatası:', err)
-        }
+      requestAnimationFrame(() => {
+        document.querySelectorAll('.react-reader-container iframe').forEach((node) => {
+          processIosIframeSelectionRef.current(node as HTMLIFrameElement)
+        })
       })
     }
 
-    attachTouchListeners()
-
-    pollId = window.setInterval(pollSelection, 200)
+    document.addEventListener('touchstart', handleTouchStart, { passive: true })
+    document.addEventListener('touchend', handleTouchEnd, { passive: true })
 
     return () => {
-      if (pollId !== null) {
-        clearInterval(pollId)
-      }
-
-      // Dokunma dinleyicilerini temizle
       document.removeEventListener('touchstart', handleTouchStart)
       document.removeEventListener('touchend', handleTouchEnd)
-
-      const iframes = document.querySelectorAll(
-        '.react-reader-container iframe'
-      )
-      iframes.forEach((iframe: any) => {
-        try {
-          const iframeDoc =
-            iframe.contentDocument || iframe.contentWindow?.document
-          if (iframeDoc) {
-            iframeDoc.removeEventListener('touchstart', handleTouchStart)
-            iframeDoc.removeEventListener('touchend', handleTouchEnd)
-          }
-        } catch (err) {
-          console.log('iOS iframe touch listener temizleme hatası:', err)
-        }
-      })
     }
-  }, [currentChapter, lastSelectedText, showContextMenu])
+  }, [])
 
   const isCapacitor = typeof window !== 'undefined' && (window as any).Capacitor
   const isAndroidDevice = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
@@ -3234,14 +3392,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
   // Toast enter animation (slide-in from right)
   useEffect(() => {
-    if (showToast) {
+    if (readerToast) {
       setToastEnter(false)
       const id = setTimeout(() => setToastEnter(true), 30)
       return () => clearTimeout(id)
     } else {
       setToastEnter(false)
     }
-  }, [showToast])
+  }, [readerToast])
 
   // Load and persist TTS language
   useEffect(() => {
@@ -3260,44 +3418,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       if (ttsLanguage) localStorage.setItem('ttsLanguage', ttsLanguage)
     } catch { }
   }, [ttsLanguage])
-
-  if (isLoading) {
-    return (
-      <div className={`reader-viewport overflow-hidden flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 ${iosSafeAreaClass}`}>
-        <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 ${iosNavSafeAreaClass}`}>
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={onBackToLibrary}
-                  className="p-2 rounded-xl bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm border border-white/30 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-                <div>
-                  <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">{bookTitle}</h1>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{t('common.loading')}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
-              <BookOpen className="w-8 h-8 text-white animate-pulse" />
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">{t('reader.loadingBook')}</h2>
-            <p className="text-gray-600 dark:text-gray-400">{t('reader.pleaseWait')}</p>
-            <div className="mt-6 w-64 h-2 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-full animate-pulse"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   if (error) {
     return (
@@ -3342,16 +3462,25 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
 
   return (
-    <div className={`reader-viewport overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col ${iosSafeAreaClass} ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
-      }`}>
-      {/* Modern Reader Header - Kompakt */}
-      <div className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-20 sticky top-0 transition-all duration-300 ${iosNavSafeAreaClass} ${isFullscreen ? 'hidden' : ''
-        }`}>
+    <div
+      className={`reader-viewport overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300 flex flex-col h-[100dvh] max-h-[100dvh] ${iosSafeAreaClass} ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-dark-950' : ''
+        } ${readerViewportChromeHidden ? 'reader-chrome-hidden' : ''}`}
+    >
+      {/* Modern Reader Header — sabit; dokununca aşağı kayarak görünür */}
+      <div
+        data-reader-chrome-control
+        className={`bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg fixed top-0 left-0 right-0 z-[45] transition-transform duration-200 ease-out will-change-transform ${iosNavSafeAreaClass} ${isFullscreen ? 'hidden' : ''
+          } ${headerBarOpen ? 'translate-y-0' : '-translate-y-full pointer-events-none'}`}
+      >
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               <button
-                onClick={onBackToLibrary}
+                type="button"
+                onClick={() => {
+                  void triggerReaderHaptic('light')
+                  onBackToLibrary()
+                }}
                 className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex-shrink-0 flex items-center justify-center"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -3414,7 +3543,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               {/* Dark Mode Toggle */}
               {toggleDarkMode && (
                 <button
-                  onClick={toggleDarkMode}
+                  type="button"
+                  onClick={() => {
+                    void triggerReaderHaptic('light')
+                    toggleDarkMode()
+                  }}
                   className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
                   title={isDarkMode ? t('app.light') : t('app.dark')}
                 >
@@ -3424,7 +3557,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
               {/* Quick Bookmark Button */}
               <button
-                onClick={toggleBookmark}
+                type="button"
+                onClick={() => {
+                  void triggerReaderHaptic('light')
+                  void toggleBookmark()
+                }}
                 className={`p-1.5 rounded-lg backdrop-blur-sm border shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center ${isBookmarked
                   ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
                   : 'bg-white dark:bg-dark-800/80 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400'
@@ -3434,119 +3571,17 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
               </button>
 
-              {/* Menu Button */}
-              <div className="relative menu-container">
-                <button
-                  onClick={() => setShowMenu(!showMenu)}
-                  className="p-1.5 rounded-lg bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 flex items-center justify-center"
-                  title={t('reader.menu')}
-                >
-                  {showMenu ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-                </button>
-
-                {/* Dropdown Menu */}
-                {showMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-56 bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border border-white/30 dark:border-dark-700/30 rounded-xl shadow-xl z-30">
-                    <div className="p-2">
-                      <button
-                        onClick={() => {
-                          setShowSettings(!showSettings)
-                          setShowMenu(false)
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                      >
-                        <Settings className="w-4 h-4" />
-                        <span>{t('reader.readingSettings')}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setShowBookmarks(!showBookmarks)
-                          setShowMenu(false)
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                      >
-                        <Bookmark className="w-4 h-4" />
-                        <span>{t('reader.bookmarks')} ({bookmarks.length})</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setShowSearch(true)
-                          setShowMenu(false)
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                      >
-                        <Search className="w-4 h-4" />
-                        <span>{t('reader.search')}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setShowHighlights(!showHighlights)
-                          setShowMenu(false)
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                      >
-                        <Highlighter className="w-4 h-4" />
-                        <span>{t('reader.highlights')} ({highlights.length})</span>
-                      </button>
-
-                      <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
-
-                      {/* TTS Language */}
-                      <div className="px-3 py-2">
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          {t('reader.speechLanguage')}
-                        </label>
-                        <select
-                          value={ttsLanguage}
-                          onChange={(e) => setTtsLanguage(e.target.value)}
-                          className="w-full text-sm px-2 py-1.5 rounded-lg border border-gray-200 dark:border-dark-700 bg-white/80 dark:bg-dark-800/80 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-500/50"
-                        >
-                          <option value="tr-TR">Türkçe (TR)</option>
-                          <option value="en-US">English (US)</option>
-                          <option value="en-GB">English (UK)</option>
-                          <option value="de-DE">Deutsch (DE)</option>
-                          <option value="es-ES">Español (ES)</option>
-                          <option value="ar-SA">العربية (SA)</option>
-                        </select>
-                      </div>
-
-                      <div className="my-2 border-t border-gray-200 dark:border-dark-700"></div>
-
-                      <div className="md:hidden">
-                        <button
-                          onClick={() => {
-                            toggleFullscreen()
-                            setShowMenu(false)
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                        >
-                          <Maximize className="w-4 h-4" />
-                          <span>{t('reader.fullscreen')}</span>
-                        </button>
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          resetReader()
-                          setShowMenu(false)
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-left rounded-lg hover:bg-gray-50 dark:hover:bg-dark-800/60 transition-colors text-gray-700 dark:text-gray-300"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        <span>{t('reader.restart')}</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <ReaderMainMenu onToggleFullscreen={toggleFullscreen} onResetReader={resetReader} />
             </div>
           </div>
         </div>
       </div>
 
+      <div
+        className={`flex-1 min-h-0 flex flex-col overflow-hidden transition-[padding] duration-200 ease-out ${
+          mainChromePadClass
+        }`}
+      >
       {showBookmarks && !isFullscreen && (
         <ReaderBookmarkPanel
           bookmarks={bookmarks}
@@ -3559,7 +3594,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
       {/* Modern Highlight Panel */}
       {showHighlights && !isFullscreen && (
-        <HighlightPanel
+        <ReaderHighlightPanel
           isOpen={showHighlights}
           onClose={() => setShowHighlights(false)}
           highlights={highlights}
@@ -3571,12 +3606,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
       {showSearch && !isFullscreen && (
         <ReaderSearchPanel
-          searchQuery={searchQuery}
-          onSearchQueryChange={setSearchQuery}
-          searchScope={searchScope}
-          onSearchScopeChange={setSearchScope}
-          isSearchingText={isSearchingText}
-          textSearchResults={textSearchResults}
           filteredToc={filteredToc}
           onClose={() => setShowSearch(false)}
           onSearchSubmit={handleSearchSubmit}
@@ -3590,14 +3619,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         <ReaderSettingsPanel
           bookId={bookId}
           userId={userId}
-          scrollMode={scrollMode}
-          location={location}
+          location={epubLocation}
           isBookmarked={isBookmarked}
           bookmarkCount={bookmarks.length}
           onClose={() => setShowSettings(false)}
           onAppearancePreset={applyReadingAppearancePreset}
           onFontSizeChange={changeFontSize}
-          onScrollModeSelect={setScrollMode}
           toggleBookmark={toggleBookmark}
           resetReader={resetReader}
         />
@@ -3607,18 +3634,43 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {displayUrl ? (
           <div
-            className={`w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${isFullscreen ? 'fullscreen' : ''
-              } ${!isFullscreen ? 'md:pb-8' : ''} ${scrollMode ? 'scroll-mode' : ''}`}
-            style={{ overflowX: 'hidden' }}
+            className={`relative w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${isFullscreen ? 'fullscreen' : ''
+              } ${scrollMode ? 'scroll-mode' : ''}`}
+            style={{
+              overflowX: 'hidden',
+              // Beyaz flaş engeli #3: container'ın kendisi tema rengini gösterir;
+              // iframe yüklenirken / geçişlerde beyaz zemin görünmez.
+              backgroundColor: getReaderSurfaceBg(
+                resolveReaderSurface(readingAppearance, isDarkMode)
+              ),
+            }}
           >
+            {isLoading && (
+              <div
+                className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-white/85 dark:bg-dark-950/90 backdrop-blur-sm"
+                aria-busy="true"
+                aria-live="polite"
+              >
+                <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
+                  <BookOpen className="w-8 h-8 text-white animate-pulse" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2 px-4 text-center">
+                  {t('reader.loadingBook')}
+                </h2>
+                <p className="text-gray-600 dark:text-gray-400 text-sm px-4 text-center">{t('reader.pleaseWait')}</p>
+                <div className="mt-6 w-64 max-w-[85vw] h-2 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 rounded-full animate-pulse" />
+                </div>
+              </div>
+            )}
             <ReactReader
               key={`reader-${bookId}-${scrollMode ? 'scroll' : 'paginated'}`}
               url={displayUrl}
-              location={location}
+              location={epubLocation}
               locationChanged={locationChanged}
               getRendition={onReaderReady}
               epubInitOptions={epubInitOptions}
-              readerStyles={fullscreenReaderStyles}
+              readerStyles={maximizedReaderStyles}
               tocChanged={(toc: any) => {
                 console.log('TOC değişti:', toc)
                 setToc(toc || [])
@@ -3642,7 +3694,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         <div className={`md:hidden fixed top-12 right-6 z-50 transition-all duration-300 ${isFullscreen ? 'block' : 'hidden'
           }`}>
           <button
-            onClick={toggleFullscreen}
+            type="button"
+            onClick={() => {
+              void triggerReaderHaptic('light')
+              toggleFullscreen()
+            }}
             className="p-2 text-gray-600/50 dark:text-white/50 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
             <Minimize className="w-6 h-6" />
@@ -3650,23 +3706,17 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         </div>
 
       </div>
+      </div>
 
-      {/* Mobile Bottom Navigation - Kompakt */}
+      {/* Mobile Bottom Navigation — sabit; dokununca yukarı kayarak görünür */}
       <div
         ref={bottomNavRef}
-        className={`md:hidden flex-shrink-0 bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-t border-white/30 dark:border-dark-700/30 shadow-lg transition-all duration-300 z-30 ${iosBottomSafeAreaClass} ${isFullscreen ? 'hidden' : ''
-          }`}>
+        data-reader-chrome-control
+        className={`md:hidden fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-dark-900/90 backdrop-blur-xl border-t border-white/30 dark:border-dark-700/30 shadow-lg transition-transform duration-200 ease-out will-change-transform z-[45] ${iosBottomSafeAreaClass} ${isFullscreen ? 'hidden' : ''
+          } ${headerBarOpen ? 'translate-y-0' : 'translate-y-full pointer-events-none'}`}
+      >
         <div className="px-4 py-2">
-          {/* Navigasyon butonları - mobil */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={goToPrevious}
-              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors"
-            >
-              <ChevronLeft className="w-3 h-3" />
-              <span className="text-xs">{t('reader.previous')}</span>
-            </button>
-
+          <div className="flex items-center justify-center">
             <div className="flex flex-col items-center gap-1 text-xs text-gray-600 dark:text-gray-400">
               {totalPages > 0 && (
                 <form
@@ -3695,21 +3745,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
                 </form>
               )}
             </div>
-
-            <button
-              onClick={goToNext}
-              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors"
-            >
-              <span className="text-xs">{t('reader.next')}</span>
-              <ChevronRight className="w-3 h-3" />
-            </button>
           </div>
         </div>
       </div>
 
-      {/* Bottom Status Bar - Kompakt */}
-      <div className={`hidden md:block fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-white/30 dark:border-dark-700/30 transition-all duration-300 z-10 ${isFullscreen ? 'hidden' : ''
-        }`}>
+      {/* Bottom Status Bar — masaüstü */}
+      <div
+        data-reader-chrome-control
+        className={`hidden md:block fixed bottom-0 left-0 right-0 bg-white dark:bg-dark-800 border-t border-white/30 dark:border-dark-700/30 transition-transform duration-200 ease-out will-change-transform z-[45] ${isFullscreen ? 'hidden' : ''
+          } ${headerBarOpen ? 'translate-y-0' : 'translate-y-full pointer-events-none'}`}
+      >
         <div className="max-w-7xl mx-auto px-4 py-1.5">
           <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
             <div className="flex items-center gap-3">
@@ -3733,6 +3778,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
           </div>
         </div>
       </div>
+
+      <ReaderNavigation
+        visible={!scrollMode && !isFullscreen}
+        onPrev={goToPrevious}
+        onNext={goToNext}
+      />
 
       {/* Bookmark Note Modal */}
       <BookmarkNoteModal
@@ -3763,7 +3814,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         show={showContextMenu}
         x={contextMenuPosition.x}
         y={contextMenuPosition.y}
-        selectedText={pendingHighlight?.selectedText || ''}
+        selectedText={lastSelectedText || pendingHighlight?.selectedText || ''}
         onHighlight={handleHighlightFromContext}
         onCopy={handleCopyFromContext}
         onSearch={handleSearchFromContext}
@@ -3773,7 +3824,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       />
 
       {/* Toast Notification */}
-      {showToast && (
+      {readerToast && (
         <div className="fixed top-32 right-6 z-[60] pointer-events-none">
           <div className={`pointer-events-auto transform transition-all duration-500 ease-out ${toastEnter ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-6'}`}>
             <div className={`
@@ -3781,17 +3832,17 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               bg-white/85 dark:bg-dark-900/85 
               backdrop-blur-xl border border-white/20 dark:border-dark-700/30
               rounded-xl shadow-2xl ring-1 ring-black/5 dark:ring-white/5
-              ${showToast.type === 'success'
+              ${readerToast.type === 'success'
                 ? 'bg-gradient-to-br from-emerald-50/70 to-green-50/70 dark:from-emerald-950/50 dark:to-green-950/50'
-                : showToast.type === 'error'
+                : readerToast.type === 'error'
                   ? 'bg-gradient-to-br from-red-50/70 to-rose-50/70 dark:from-red-950/50 dark:to-rose-950/50'
                   : 'bg-gradient-to-br from-blue-50/70 to-indigo-50/70 dark:from-blue-950/50 dark:to-indigo-950/50'
               }
             `}>
               {/* Accent Border */}
-              <div className={`absolute inset-y-0 left-0 w-[2px] ${showToast.type === 'success'
+              <div className={`absolute inset-y-0 left-0 w-[2px] ${readerToast.type === 'success'
                 ? 'bg-gradient-to-b from-emerald-500 to-green-600'
-                : showToast.type === 'error'
+                : readerToast.type === 'error'
                   ? 'bg-gradient-to-b from-red-500 to-rose-600'
                   : 'bg-gradient-to-b from-blue-500 to-indigo-600'
                 }`} />
@@ -3799,30 +3850,30 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
               <div className="p-2.5 pl-4">
                 <div className="flex items-start gap-2">
                   <div className="flex-shrink-0">
-                    {showToast.type === 'success' && (
+                    {readerToast.type === 'success' && (
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     )}
-                    {showToast.type === 'error' && (
+                    {readerToast.type === 'error' && (
                       <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
                     )}
-                    {showToast.type === 'info' && (
+                    {readerToast.type === 'info' && (
                       <Info className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                     )}
                   </div>
 
                   <div className="flex-1 pt-0.5">
                     <p className="text-[12px] font-semibold text-gray-900 dark:text-gray-100">
-                      {showToast.type === 'success' && t('reader.toastTitles.success')}
-                      {showToast.type === 'error' && t('reader.toastTitles.error')}
-                      {showToast.type === 'info' && t('reader.toastTitles.info')}
+                      {readerToast.type === 'success' && t('reader.toastTitles.success')}
+                      {readerToast.type === 'error' && t('reader.toastTitles.error')}
+                      {readerToast.type === 'info' && t('reader.toastTitles.info')}
                     </p>
                     <p className="text-[12px] text-gray-700 dark:text-gray-300 mt-0.5 leading-relaxed">
-                      {showToast.message}
+                      {readerToast.message}
                     </p>
                   </div>
 
                   <button
-                    onClick={() => setShowToast(null)}
+                    onClick={() => setReaderToast(null)}
                     className="flex-shrink-0 p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-md hover:bg-gray-100/70 dark:hover:bg-dark-800/70 transition-colors"
                     aria-label={t('common.close')}
                   >
@@ -3833,9 +3884,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
 
               <div className="h-px w-full bg-gray-200/30 dark:bg-dark-700/30">
                 <div
-                  className={`h-full transition-all duration-[3000ms] ease-linear ${showToast.type === 'success'
+                  className={`h-full transition-all duration-[3000ms] ease-linear ${readerToast.type === 'success'
                     ? 'bg-gradient-to-r from-emerald-500 to-green-500'
-                    : showToast.type === 'error'
+                    : readerToast.type === 'error'
                       ? 'bg-gradient-to-r from-red-500 to-rose-500'
                       : 'bg-gradient-to-r from-blue-500 to-indigo-500'
                     }`}

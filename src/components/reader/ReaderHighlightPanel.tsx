@@ -1,8 +1,8 @@
 import React from 'react'
 import { X, Highlighter, Edit3, Trash2, MessageSquare } from 'lucide-react'
-import type { Highlight } from '../lib/progressService'
+import type { Highlight } from '../../lib/progressService'
 
-interface HighlightPanelProps {
+export interface ReaderHighlightPanelProps {
   isOpen: boolean
   onClose: () => void
   highlights: Highlight[]
@@ -30,17 +30,16 @@ const getColorClasses = (color: string) => {
   }
 }
 
-export const HighlightPanel: React.FC<HighlightPanelProps> = ({
+export const ReaderHighlightPanel: React.FC<ReaderHighlightPanelProps> = ({
   isOpen,
   onClose,
   highlights,
   onHighlightClick,
   onEditHighlight,
-  onDeleteHighlight
+  onDeleteHighlight,
 }) => {
   const [selectedHighlightId, setSelectedHighlightId] = React.useState<string | null>(null)
-  
-  // Panel açıldığında seçili highlight'ı temizle
+
   React.useEffect(() => {
     if (isOpen) {
       setSelectedHighlightId(null)
@@ -62,11 +61,12 @@ export const HighlightPanel: React.FC<HighlightPanelProps> = ({
             onClick={onClose}
             className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
             title="Kapat"
+            type="button"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
-        
+
         {highlights.length === 0 ? (
           <div className="text-center py-8">
             <Highlighter className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
@@ -83,8 +83,8 @@ export const HighlightPanel: React.FC<HighlightPanelProps> = ({
                 <div
                   key={highlight.id}
                   className={`p-4 rounded-xl border transition-all duration-200 cursor-pointer hover:shadow-md ${
-                    selectedHighlightId === highlight.id 
-                      ? 'ring-2 ring-blue-500 ring-offset-2' 
+                    selectedHighlightId === highlight.id
+                      ? 'ring-2 ring-blue-500 ring-offset-2'
                       : ''
                   } ${colorClasses.bg} ${colorClasses.border}`}
                   onClick={() => {
@@ -94,14 +94,12 @@ export const HighlightPanel: React.FC<HighlightPanelProps> = ({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      {/* Selected Text */}
                       <div className="mb-2">
                         <p className={`text-sm font-medium leading-relaxed ${colorClasses.text}`}>
-                          "{highlight.selected_text}"
+                          &quot;{highlight.selected_text}&quot;
                         </p>
                       </div>
 
-                      {/* Note */}
                       {highlight.note && (
                         <div className="mb-2">
                           <div className="flex items-start gap-2">
@@ -113,7 +111,6 @@ export const HighlightPanel: React.FC<HighlightPanelProps> = ({
                         </div>
                       )}
 
-                      {/* Chapter & Date */}
                       <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                         {highlight.chapter_title && (
                           <>
@@ -127,18 +124,16 @@ export const HighlightPanel: React.FC<HighlightPanelProps> = ({
                             month: 'short',
                             day: 'numeric',
                             hour: '2-digit',
-                            minute: '2-digit'
+                            minute: '2-digit',
                           })}
                         </span>
                       </div>
                     </div>
 
-                    {/* Action Buttons */}
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      {/* Color Indicator */}
-                      <div className={`w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 ${colorClasses.bg}`}></div>
-                      
+                      <div className={`w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 ${colorClasses.bg}`} />
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation()
                           onEditHighlight(highlight)
@@ -148,8 +143,9 @@ export const HighlightPanel: React.FC<HighlightPanelProps> = ({
                       >
                         <Edit3 className="w-3 h-3" />
                       </button>
-                      
+
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation()
                           onDeleteHighlight(highlight.id)
@@ -170,5 +166,3 @@ export const HighlightPanel: React.FC<HighlightPanelProps> = ({
     </div>
   )
 }
-
-export default HighlightPanel

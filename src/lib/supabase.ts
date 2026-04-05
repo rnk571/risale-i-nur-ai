@@ -19,6 +19,8 @@ export interface Book {
   description?: string
   cover_image?: string
   epub_file_path: string
+  /** Opsiyonel: açılmış EPUB kökü (META-INF üst dizini). Verilirse epub.js zip indirmeden spine öğelerini ayrı HTTP ile yükler. */
+  epub_unpacked_base_url?: string | null
   // Geçiş dönemi: EPUB veya PDF URL'ini tek alanda tutuyoruz
   language?: 'tr' | 'en'
   is_public?: boolean

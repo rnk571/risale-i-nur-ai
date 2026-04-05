@@ -16,6 +16,10 @@ import {
   BookmarkCheck,
   BookmarkPlus,
   RotateCcw,
+  Eye,
+  EyeOff,
+  Hand,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { saveReadingProgress } from '../../lib/progressService'
 import { useReaderStore } from '../../stores/useReaderStore'
@@ -31,14 +35,12 @@ import {
 export interface ReaderSettingsPanelProps {
   bookId: string
   userId?: string
-  scrollMode: boolean
   location: string | number
   isBookmarked: boolean
   bookmarkCount: number
   onClose: () => void
   onAppearancePreset: (preset: ReaderAppearancePreset) => void
   onFontSizeChange: (size: number) => void
-  onScrollModeSelect: (scroll: boolean) => void
   toggleBookmark: () => void
   resetReader: () => void
 }
@@ -46,14 +48,12 @@ export interface ReaderSettingsPanelProps {
 export const ReaderSettingsPanel = memo(function ReaderSettingsPanel({
   bookId,
   userId,
-  scrollMode,
   location,
   isBookmarked,
   bookmarkCount,
   onClose,
   onAppearancePreset,
   onFontSizeChange,
-  onScrollModeSelect,
   toggleBookmark,
   resetReader,
 }: ReaderSettingsPanelProps) {
@@ -78,6 +78,14 @@ export const ReaderSettingsPanel = memo(function ReaderSettingsPanel({
   const setReaderFontIdTr = useReaderStore((s) => s.setReaderFontIdTr)
   const setReaderFontIdAr = useReaderStore((s) => s.setReaderFontIdAr)
   const progressPercentage = useReaderStore((s) => s.progressPercentage)
+  const scrollMode = useReaderStore((s) => s.scrollMode)
+  const setScrollMode = useReaderStore((s) => s.setScrollMode)
+  const readerNavChromeMode = useReaderStore((s) => s.readerNavChromeMode)
+  const setReaderNavChromeMode = useReaderStore((s) => s.setReaderNavChromeMode)
+  const readerEdgeTapEnabled = useReaderStore((s) => s.readerEdgeTapEnabled)
+  const setReaderEdgeTapEnabled = useReaderStore((s) => s.setReaderEdgeTapEnabled)
+  const readerMarginPresetIndex = useReaderStore((s) => s.readerMarginPresetIndex)
+  const setReaderMarginPresetIndex = useReaderStore((s) => s.setReaderMarginPresetIndex)
 
   return (
     <div className="settings-panel z-10 mx-2 shrink-0 sm:mx-4 flex max-h-[min(50vh,520px)] flex-col overflow-hidden rounded-b-2xl border border-t-0 border-gray-200/90 bg-white/93 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.22)] backdrop-blur-xl dark:border-dark-700/55 dark:bg-dark-900/93 dark:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.5)] animate-in slide-in-from-top-2 duration-200">
@@ -323,6 +331,79 @@ export const ReaderSettingsPanel = memo(function ReaderSettingsPanel({
 
         {readingSettingsTab === 'page' && (
           <div className="space-y-4">
+            <div className="rounded-xl border border-gray-200/80 bg-gradient-to-br from-slate-50/80 to-white/50 p-3 dark:border-dark-600/60 dark:from-dark-800/40 dark:to-dark-900/30">
+              <p className="mb-2 text-xs font-semibold text-gray-800 dark:text-gray-100">{t('reader.navChromeTitle')}</p>
+              <div className="flex flex-col gap-1.5">
+                {(
+                  [
+                    { id: 'always' as const, label: t('reader.navChromeAlways'), icon: Eye },
+                    { id: 'on_touch' as const, label: t('reader.navChromeOnTouch'), icon: Hand },
+                    { id: 'hidden' as const, label: t('reader.navChromeHidden'), icon: EyeOff },
+                  ]
+                ).map((row) => {
+                  const Icon = row.icon
+                  const on = readerNavChromeMode === row.id
+                  return (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => setReaderNavChromeMode(row.id)}
+                      className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-medium transition-colors duration-150 ${on
+                        ? 'border-sky-500 bg-sky-50 text-sky-900 dark:border-sky-600 dark:bg-sky-950/50 dark:text-sky-100'
+                        : 'border-gray-200/80 bg-white/60 text-gray-700 dark:border-dark-600 dark:bg-dark-800/50 dark:text-gray-200'
+                        }`}
+                    >
+                      <Icon className="h-4 w-4 shrink-0 opacity-80" />
+                      {row.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200/80 bg-white/60 px-3 py-2.5 dark:border-dark-600/60 dark:bg-dark-800/40">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-gray-800 dark:text-gray-100">{t('reader.edgeTapPageTurn')}</p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">{t('reader.edgeTapHint')}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={readerEdgeTapEnabled}
+                onClick={() => setReaderEdgeTapEnabled(!readerEdgeTapEnabled)}
+                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ${readerEdgeTapEnabled ? 'bg-sky-600' : 'bg-gray-300 dark:bg-dark-600'
+                  }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ease-out will-change-transform ${readerEdgeTapEnabled ? 'left-5' : 'left-0.5'
+                    }`}
+                />
+              </button>
+            </div>
+
+            <div>
+              <label className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {t('reader.marginPresetTitle')}
+              </label>
+              <div className="flex gap-2">
+                {([0, 8, 16] as const).map((px, idx) => (
+                  <button
+                    key={px}
+                    type="button"
+                    onClick={() => setReaderMarginPresetIndex(idx)}
+                    className={`flex-1 rounded-lg border py-2 text-center text-xs font-semibold transition-colors duration-150 ${readerMarginPresetIndex === idx
+                      ? 'border-sky-500 bg-sky-50 text-sky-900 dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-100'
+                      : 'border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/60 dark:text-gray-200'
+                      }`}
+                  >
+                    {px}px
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">{t('reader.marginPresetHint')}</p>
+            </div>
+
             <div>
               <label className="mb-2 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reader.scrollMode')}</label>
               <div className="flex gap-2">
@@ -338,7 +419,7 @@ export const ReaderSettingsPanel = memo(function ReaderSettingsPanel({
                       onClick={() => {
                         const newScrollMode = mode.id === 'scroll'
                         if (newScrollMode !== scrollMode) {
-                          onScrollModeSelect(newScrollMode)
+                          setScrollMode(newScrollMode)
                           localStorage.setItem(`scrollMode_${bookId}`, String(newScrollMode))
                           if (!newScrollMode) {
                             const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)

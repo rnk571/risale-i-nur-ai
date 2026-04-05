@@ -137,11 +137,26 @@ body {
   flex-direction: column;
 }
 
-/* Mobil cihazlarda safe area padding'leri */
-@media (max-width: 768px) {
-  .react-reader-container {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
+/* Üst/alt bar gizliyken tam yükseklik; padding parent’taki reader-main-chrome-pad ile */
+.reader-viewport.reader-chrome-hidden .react-reader-container {
+  height: 100% !important;
+  min-height: 100% !important;
+  max-height: 100% !important;
+}
+
+.reader-main-chrome-pad--hidden {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+.reader-main-chrome-pad--visible {
+  padding-top: calc(3.25rem + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 768px) {
+  .reader-main-chrome-pad--visible {
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -160,18 +175,18 @@ body {
   flex-direction: column !important;
 }
 
-/* Yükseklik ayarlamaları */
+/* Masaüstü: flex parent yüksekliğini doldur (sabit header/nav çıkarması yok) */
 .react-reader-container {
-  height: calc(100dvh - 90px) !important;
-  min-height: calc(100dvh - 90px) !important;
-  max-height: calc(100dvh - 90px) !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  max-height: 100% !important;
 }
 
 @supports not (height: 100dvh) {
   .react-reader-container {
-    height: calc(100vh - 90px) !important;
-    min-height: calc(100vh - 90px) !important;
-    max-height: calc(100vh - 90px) !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    max-height: 100% !important;
   }
 }
 
@@ -211,8 +226,9 @@ body {
   min-height: 100% !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
-  padding-top: 20px !important;
-  padding-bottom: 40px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin: 0 !important;
 }
 
 /* Mobil için özel yükseklik ayarlamaları */
@@ -230,8 +246,7 @@ body {
     height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
     min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
     max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
-    padding-top: 40px !important;
-    /* Üst kısımda boşluk bırak */
+    padding-top: env(safe-area-inset-top, 0px) !important;
   }
 
   @supports not (height: 100dvh) {
@@ -721,4 +736,48 @@ input[type="range"].slider::-moz-range-thumb {
 input[type="range"].slider::-moz-range-thumb:hover {
   transform: scale(1.1);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Beyaz flaş engelleyici ──────────────────────────────────────────────────
+   iframe element'inin kendisi saydam: içerik yüklenene kadar parent container'ın
+   backgroundColor (tema rengi) görünür. Bu, 3 numaralı katman koruması.
+   ─────────────────────────────────────────────────────────────────────────── */
+.react-reader-container iframe {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* ── EPUB.js sayfa geçiş animasyonu ─────────────────────────────────────────
+   epubjs, paginated modda iframe'i bir "book" container içinde tutar.
+   Bu container'a GPU hızlandırmalı transform geçişi ekleriz.
+   translate3d(0,0,0) → compositor thread → 60 FPS, main thread'i bloklamaz.
+   ─────────────────────────────────────────────────────────────────────────── */
+.react-reader-container .epub-container,
+.react-reader-container [class*="epub"] {
+  will-change: transform;
+}
+
+/* Sayfa slide animasyonu — epubjs'in kendi swipe wrapper'ına */
+.react-reader-container .epub-view,
+.react-reader-container .epub-container > * {
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+}
+
+/* Liquid-glass nav butonları — hafif glow efekti (hover/focus) */
+.reader-nav-glass {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.reader-nav-glass:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.6);
+  outline-offset: 2px;
+}
+
+/* Nav buton görünürlük geçişi */
+[data-reader-fab-nav] {
+  transition-property: opacity, transform, box-shadow;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }

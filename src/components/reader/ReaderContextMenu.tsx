@@ -25,7 +25,7 @@ export const ReaderContextMenu: React.FC<ReaderContextMenuProps> = ({
   onSearch,
   onClose,
   onSpeak,
-  isTtsAvailable
+  isTtsAvailable,
 }) => {
   const { t } = useTranslation()
 
@@ -33,7 +33,8 @@ export const ReaderContextMenu: React.FC<ReaderContextMenuProps> = ({
 
   const isMobile = window.innerWidth < 768
   const menuWidth = isMobile ? Math.min(280, window.innerWidth - 20) : 240
-  const menuItemCount = isTtsAvailable && onSpeak ? 4 : 3
+  const extra = isTtsAvailable && onSpeak ? 1 : 0
+  const menuItemCount = 3 + extra
   const menuHeight = 60 + (menuItemCount * 44) + 8
 
   let adjustedX = x - menuWidth / 2

@@ -773,6 +773,7 @@ function App() {
           ) : (
             <EpubReader
               bookUrl={selectedBook.epub_file_path}
+              epubUnpackedBaseUrl={selectedBook.epub_unpacked_base_url ?? undefined}
               bookTitle={selectedBook.title}
               bookId={selectedBook.id}
               userId={user?.id}

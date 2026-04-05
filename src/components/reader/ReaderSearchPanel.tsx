@@ -1,22 +1,13 @@
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, X, Clipboard } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import { useReaderStore } from '../../stores/useReaderStore'
+import type { TextSearchResult } from './searchTypes'
 
-export interface TextSearchResult {
-  id: string
-  chapterTitle: string
-  snippet: string
-  cfi?: string
-  href?: string
-}
+export type { TextSearchResult } from './searchTypes'
 
 export interface ReaderSearchPanelProps {
-  searchQuery: string
-  onSearchQueryChange: (q: string) => void
-  searchScope: 'toc' | 'text'
-  onSearchScopeChange: (s: 'toc' | 'text') => void
-  isSearchingText: boolean
-  textSearchResults: TextSearchResult[]
   filteredToc: any[]
   onClose: () => void
   onSearchSubmit: () => void | Promise<void>
@@ -26,12 +17,6 @@ export interface ReaderSearchPanelProps {
 }
 
 export const ReaderSearchPanel = memo(function ReaderSearchPanel({
-  searchQuery,
-  onSearchQueryChange,
-  searchScope,
-  onSearchScopeChange,
-  isSearchingText,
-  textSearchResults,
   filteredToc,
   onClose,
   onSearchSubmit,
@@ -40,6 +25,23 @@ export const ReaderSearchPanel = memo(function ReaderSearchPanel({
   onTextResultClick,
 }: ReaderSearchPanelProps) {
   const { t } = useTranslation()
+  const {
+    searchQuery,
+    searchScope,
+    isSearchingText,
+    textSearchResults,
+    setSearchQuery,
+    setSearchScope,
+  } = useReaderStore(
+    useShallow((s) => ({
+      searchQuery: s.searchQuery,
+      searchScope: s.searchScope,
+      isSearchingText: s.isSearchingText,
+      textSearchResults: s.textSearchResults,
+      setSearchQuery: s.setSearchQuery,
+      setSearchScope: s.setSearchScope,
+    }))
+  )
 
   return (
     <div className="search-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
@@ -70,7 +72,7 @@ export const ReaderSearchPanel = memo(function ReaderSearchPanel({
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => onSearchQueryChange(e.target.value)}
+                  onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       void onSearchSubmit()
@@ -84,7 +86,7 @@ export const ReaderSearchPanel = memo(function ReaderSearchPanel({
                 {searchQuery && (
                   <button
                     type="button"
-                    onClick={() => onSearchQueryChange('')}
+                    onClick={() => setSearchQuery('')}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-dark-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors flex items-center justify-center"
                     title={t('common.clear') || 'Temizle'}
                   >
@@ -110,7 +112,7 @@ export const ReaderSearchPanel = memo(function ReaderSearchPanel({
 
             <div className="flex items-center gap-2 text-xs">
               <button
-                onClick={() => onSearchScopeChange('toc')}
+                onClick={() => setSearchScope('toc')}
                 className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${searchScope === 'toc'
                   ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
                   : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
@@ -119,7 +121,7 @@ export const ReaderSearchPanel = memo(function ReaderSearchPanel({
                 {t('reader.searchInHeadings')}
               </button>
               <button
-                onClick={() => onSearchScopeChange('text')}
+                onClick={() => setSearchScope('text')}
                 className={`flex-1 px-2.5 py-1.5 rounded-full border text-xs font-medium transition-colors ${searchScope === 'text'
                   ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300'
                   : 'bg-white dark:bg-dark-800 border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
