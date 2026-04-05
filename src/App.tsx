@@ -68,7 +68,7 @@ function App() {
   const [initialHighlightCfi, setInitialHighlightCfi] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [showUserMenu, setShowUserMenu] = useState(false)
-  const { isDarkMode, toggleDarkMode } = useDarkMode()
+  const { isDarkMode, toggleDarkMode, setDarkMode } = useDarkMode()
   const [bookOpenChoice, setBookOpenChoice] = useState<Book | null>(null)
   const [isGuestMode, setIsGuestMode] = useState(() => {
     // Restore guest mode from localStorage (for page reload persistence)
@@ -780,6 +780,7 @@ function App() {
               onLoginRequired={() => setShowLoginPrompt(true)}
               isDarkMode={isDarkMode}
               toggleDarkMode={toggleDarkMode}
+              setDarkMode={setDarkMode}
               initialLocation={initialReaderLocation || undefined}
               initialHighlightCfi={initialHighlightCfi || undefined}
             />

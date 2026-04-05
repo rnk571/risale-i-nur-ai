@@ -91,6 +91,33 @@ body {
   overflow: hidden;
 }
 
+/* Kitaplık: yatay raf kaydırması — ince scrollbar */
+.library-shelf-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(161 161 170 / 0.85) transparent;
+}
+
+.library-shelf-scroll::-webkit-scrollbar {
+  height: 5px;
+}
+
+.library-shelf-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.library-shelf-scroll::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: rgb(161 161 170 / 0.75);
+}
+
+.dark .library-shelf-scroll {
+  scrollbar-color: rgb(113 113 122 / 0.9) transparent;
+}
+
+.dark .library-shelf-scroll::-webkit-scrollbar-thumb {
+  background-color: rgb(113 113 122 / 0.85);
+}
+
 /* React Reader Styles */
 .reader-viewport {
   height: 100dvh;

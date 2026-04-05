@@ -1,13 +1,16 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ReactReader, ReactReaderStyle } from 'react-reader'
-import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info, Search, Clipboard, ScrollText } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, BookOpen, ArrowLeft, RotateCcw, Bookmark, BookmarkCheck, BookmarkPlus, Menu, X, AlertTriangle, Minimize, Maximize, Sun, Moon, Trash2, Highlighter, CheckCircle2, XCircle, Info, Search, Clipboard, ScrollText, Palette, Type, LayoutList, Sparkles, Coffee, Contrast, Monitor } from 'lucide-react'
 import { saveReadingProgress, getReadingProgress, addBookmark, getBookmarks, deleteBookmark, type Bookmark as BookmarkType, addHighlight, getHighlights, updateHighlight, deleteHighlight, type Highlight } from '../lib/progressService'
 import { trackEvent } from '../lib/analytics'
 import { BookmarkNoteModal } from './BookmarkNoteModal'
 import { HighlightModal } from './HighlightModal'
 import { HighlightPanel } from './HighlightPanel'
 import { ContextMenu } from './ContextMenu'
+
+export type ReaderSurfaceTheme = 'light' | 'sepia' | 'dark' | 'oled'
+export type ReaderAppearancePreset = ReaderSurfaceTheme | 'system'
 
 interface EpubReaderProps {
   bookUrl: string
@@ -18,6 +21,8 @@ interface EpubReaderProps {
   onLoginRequired?: () => void  // Called when guest tries to use account features
   isDarkMode?: boolean
   toggleDarkMode?: () => void
+  /** Açık/Sepia → false, Koyu/OLED → true; "Sistem" seçilince çağrılmaz */
+  setDarkMode?: (dark: boolean) => void
   initialLocation?: string
   initialHighlightCfi?: string
 }
@@ -28,6 +33,247 @@ interface TextSearchResult {
   snippet: string
   cfi?: string
   href?: string
+}
+
+const READER_APPEARANCE_LS = 'epubReader_appearance'
+const READER_COLOR_LS_TR = 'epubReader_trColor'
+const READER_COLOR_LS_AR = 'epubReader_arColor'
+const READER_COLOR_LS_FA = 'epubReader_faColor'
+const DEFAULT_READER_TR = '#212121'
+const DEFAULT_READER_AR = '#1565C0'
+const DEFAULT_READER_FA = '#00695C'
+
+const READER_PALETTE_TR = ['#212121', '#000000', '#424242', '#5D4037', '#1565C0', '#00695C', '#2E7D32', '#6A1B9A', '#C62828', '#E65100'] as const
+const READER_PALETTE_AR = ['#1565C0', '#0D47A1', '#1976D2', '#00838F', '#00695C', '#2E7D32', '#283593', '#4A148C', '#B71C1C', '#212121'] as const
+const READER_PALETTE_FA = ['#00695C', '#004D40', '#00796B', '#00897B', '#1565C0', '#33691E', '#5D4037', '#37474F', '#263238', '#4E342E'] as const
+
+function readReaderColorLs(key: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const v = localStorage.getItem(key)
+    if (v && /^#[0-9A-Fa-f]{6}$/.test(v.trim())) return v.trim()
+  } catch { /* ignore */ }
+  return fallback
+}
+
+const READER_APPEARANCE_IDS = new Set<string>(['light', 'sepia', 'dark', 'oled', 'system'])
+
+function readReaderAppearance(): ReaderAppearancePreset {
+  if (typeof window === 'undefined') return 'system'
+  try {
+    const v = localStorage.getItem(READER_APPEARANCE_LS)?.trim()
+    if (v && READER_APPEARANCE_IDS.has(v)) return v as ReaderAppearancePreset
+  } catch { /* ignore */ }
+  return 'system'
+}
+
+export function resolveReaderSurface(preset: ReaderAppearancePreset, isDark: boolean): ReaderSurfaceTheme {
+  if (preset === 'system') return isDark ? 'dark' : 'light'
+  return preset
+}
+
+const READER_SURFACE_SHELL: Record<ReaderSurfaceTheme, { bg: string; link: string }> = {
+  light: { bg: '#ffffff', link: '#2563eb' },
+  sepia: { bg: '#f4ecd8', link: '#b45309' },
+  dark: { bg: '#0f172a', link: '#93c5fd' },
+  oled: { bg: '#000000', link: '#60a5fa' },
+}
+
+const READER_FONT_LS_TR = 'epubReader_fontIdTr'
+const READER_FONT_LS_AR = 'epubReader_fontIdAr'
+const READER_FONT_LS_LEGACY = 'epubReader_fontId'
+const SYSTEM_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+
+/** Türkçe / Latin gövde — Arapça listesiyle ortak font yok. public/font + origin. */
+const READER_FONTS_TR = [
+  { id: 'sf-pro-tr', label: 'SF Pro TR', face: 'AppReaderSfProTr', file: 'SF-Pro-TR.ttf', fallbacks: 'sans-serif' },
+  { id: 'bnazanin', label: 'B Nazanin', face: 'AppReaderBNazanin', file: 'BNazanin.ttf', fallbacks: 'serif' },
+] as const
+
+/** Arapça / Farsça / RTL blokları — yalnızca bu tipografiler. */
+const READER_FONTS_AR = [
+  { id: 'scheherazade', label: 'Scheherazade New', face: 'AppReaderScheherazade', file: 'ScheherazadeNew-Regular.ttf', fallbacks: 'serif' },
+  { id: 'uthman-taha', label: 'Uthman Taha', face: 'AppReaderUthman', file: 'Uthman Taha Regular.ttf', fallbacks: 'serif' },
+  { id: 'amiri', label: 'Amiri', face: 'AppReaderAmiri', file: 'Amiri-Regular.ttf', fallbacks: 'serif' },
+] as const
+
+type ReaderFontDef = (typeof READER_FONTS_TR)[number] | (typeof READER_FONTS_AR)[number]
+
+const READER_FONT_TR_IDS = new Set<string>(READER_FONTS_TR.map((f) => f.id))
+const READER_FONT_AR_IDS = new Set<string>(READER_FONTS_AR.map((f) => f.id))
+
+const DEFAULT_READER_FONT_ID_TR = READER_FONTS_TR[0].id
+const DEFAULT_READER_FONT_ID_AR = READER_FONTS_AR[0].id
+
+function readReaderFontIdTr(): string {
+  if (typeof window === 'undefined') return DEFAULT_READER_FONT_ID_TR
+  try {
+    let v = localStorage.getItem(READER_FONT_LS_TR)?.trim()
+    if (v && READER_FONT_TR_IDS.has(v)) return v
+    const leg = localStorage.getItem(READER_FONT_LS_LEGACY)?.trim()
+    if (leg && READER_FONT_TR_IDS.has(leg)) return leg
+  } catch { /* ignore */ }
+  return DEFAULT_READER_FONT_ID_TR
+}
+
+function readReaderFontIdAr(): string {
+  if (typeof window === 'undefined') return DEFAULT_READER_FONT_ID_AR
+  try {
+    let v = localStorage.getItem(READER_FONT_LS_AR)?.trim()
+    if (v && READER_FONT_AR_IDS.has(v)) return v
+    const leg = localStorage.getItem(READER_FONT_LS_LEGACY)?.trim()
+    if (leg && READER_FONT_AR_IDS.has(leg)) return leg
+  } catch { /* ignore */ }
+  return DEFAULT_READER_FONT_ID_AR
+}
+
+function getReaderFontDefTr(id: string): (typeof READER_FONTS_TR)[number] {
+  return READER_FONTS_TR.find((f) => f.id === id) ?? READER_FONTS_TR[0]
+}
+
+function getReaderFontDefAr(id: string): (typeof READER_FONTS_AR)[number] {
+  return READER_FONTS_AR.find((f) => f.id === id) ?? READER_FONTS_AR[0]
+}
+
+function fontFaceBlock(origin: string, def: ReaderFontDef): string {
+  if (!def.file || !def.face || !origin) return ''
+  return `@font-face{font-family:'${def.face}';src:url('${origin}/font/${encodeURIComponent(def.file)}') format('truetype');font-display:swap;}`
+}
+
+function collectFontFaces(origin: string, defs: ReaderFontDef[]): string {
+  const seen = new Set<string>()
+  let out = ''
+  for (const d of defs) {
+    if (!d.face || seen.has(d.face)) continue
+    const block = fontFaceBlock(origin, d)
+    if (block) {
+      seen.add(d.face)
+      out += block
+    }
+  }
+  return out
+}
+
+/** Okuma yüzeyi (açık / sepia / koyu / OLED) — metin renkleri kullanıcı paletinden. */
+function buildReaderThemeCss(
+  surface: ReaderSurfaceTheme,
+  tr: string,
+  ar: string,
+  fa: string,
+  familyTr: string,
+  familyAr: string,
+  wTr: number,
+  wAr: number,
+  faceCss: string
+): string {
+  const shell = READER_SURFACE_SHELL[surface]
+  const arBlock = `
+html body [lang="ar"], html body [lang^="ar-"], html body :lang(ar), html body :lang(ara), html body .proepub-arabic {
+  color: ${ar} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+html body [lang="ar"] *, html body [lang^="ar-"] *, html body .proepub-arabic * {
+  color: ${ar} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+html body :lang(ar) *, html body :lang(ara) * {
+  color: ${ar} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]):not(:lang(tr)) {
+  color: ${ar} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) span,
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) div,
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) p,
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) i,
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) b,
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) em,
+html body *[dir="rtl"]:not([lang="tr"]):not([lang^="tr-"]) strong {
+  color: ${ar} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+body[dir="rtl"] {
+  color: ${ar} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+body[dir="rtl"] p, body[dir="rtl"] div, body[dir="rtl"] span, body[dir="rtl"] li,
+body[dir="rtl"] h1, body[dir="rtl"] h2, body[dir="rtl"] h3, body[dir="rtl"] h4, body[dir="rtl"] h5, body[dir="rtl"] h6,
+body[dir="rtl"] blockquote, body[dir="rtl"] section, body[dir="rtl"] article,
+body[dir="rtl"] td, body[dir="rtl"] th, body[dir="rtl"] caption, body[dir="rtl"] label {
+  color: ${ar} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+`
+  const faBlock = `
+html body [lang="fa"], html body [lang^="fa-"], html body :lang(fa), html body .proepub-farsi {
+  color: ${fa} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+html body [lang="fa"] *, html body [lang^="fa-"] *, html body .proepub-farsi * {
+  color: ${fa} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+html body :lang(fa) * {
+  color: ${fa} !important;
+  font-family: ${familyAr} !important;
+  font-weight: ${wAr} !important;
+}
+`
+  return `${faceCss}
+html {
+  background-color: ${shell.bg} !important;
+  color: ${tr} !important;
+}
+body {
+  background-color: ${shell.bg} !important;
+  color: ${tr} !important;
+  font-family: ${familyTr} !important;
+  font-weight: ${wTr} !important;
+  line-height: 1.6 !important;
+}
+p, div, span, section, article, li, blockquote, figcaption, dd, dt, pre, code, td, th, caption, label {
+  color: ${tr} !important;
+  background-color: transparent !important;
+  font-family: ${familyTr} !important;
+  font-weight: ${wTr} !important;
+}
+h1, h2, h3, h4, h5, h6 {
+  color: ${tr} !important;
+  opacity: 0.9;
+  background-color: transparent !important;
+  font-family: ${familyTr} !important;
+  font-weight: ${wTr} !important;
+}
+${arBlock}
+${faBlock}
+a, a:visited {
+  color: ${shell.link} !important;
+}
+`
+}
+
+const READER_WEIGHT_LS_TR = 'epubReader_weightTr'
+const READER_WEIGHT_LS_AR = 'epubReader_weightAr'
+const READER_WEIGHT_CHOICES = [300, 400, 500, 600, 700] as const
+
+function readReaderWeightLs(key: string, fallback: number): number {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const v = parseInt(localStorage.getItem(key) || '', 10)
+    if (READER_WEIGHT_CHOICES.includes(v as (typeof READER_WEIGHT_CHOICES)[number])) return v
+  } catch { /* ignore */ }
+  return fallback
 }
 
 // iOS için haptic feedback, TTS ve Clipboard
@@ -61,6 +307,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   onLoginRequired,
   isDarkMode = false,
   toggleDarkMode,
+  setDarkMode,
   initialLocation,
   initialHighlightCfi
 }) => {
@@ -69,7 +316,32 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
-  const [readerTheme, setReaderTheme] = useState('light')
+  const [readingAppearance, setReadingAppearance] = useState<ReaderAppearancePreset>(() => readReaderAppearance())
+  const readingAppearanceRef = useRef(readingAppearance)
+  readingAppearanceRef.current = readingAppearance
+  const [trColor, setTrColor] = useState(() => readReaderColorLs(READER_COLOR_LS_TR, DEFAULT_READER_TR))
+  const [arColor, setArColor] = useState(() => readReaderColorLs(READER_COLOR_LS_AR, DEFAULT_READER_AR))
+  const [faColor, setFaColor] = useState(() => readReaderColorLs(READER_COLOR_LS_FA, DEFAULT_READER_FA))
+  const trColorRef = useRef(trColor)
+  const arColorRef = useRef(arColor)
+  const faColorRef = useRef(faColor)
+  trColorRef.current = trColor
+  arColorRef.current = arColor
+  faColorRef.current = faColor
+  const [readerFontIdTr, setReaderFontIdTr] = useState<string>(() => readReaderFontIdTr())
+  const [readerFontIdAr, setReaderFontIdAr] = useState<string>(() => readReaderFontIdAr())
+  const readerFontIdTrRef = useRef(readerFontIdTr)
+  const readerFontIdArRef = useRef(readerFontIdAr)
+  readerFontIdTrRef.current = readerFontIdTr
+  readerFontIdArRef.current = readerFontIdAr
+  const [readerWeightTr, setReaderWeightTr] = useState<number>(() => readReaderWeightLs(READER_WEIGHT_LS_TR, 400))
+  const [readerWeightAr, setReaderWeightAr] = useState<number>(() => readReaderWeightLs(READER_WEIGHT_LS_AR, 400))
+  const readerWeightTrRef = useRef(readerWeightTr)
+  const readerWeightArRef = useRef(readerWeightAr)
+  readerWeightTrRef.current = readerWeightTr
+  readerWeightArRef.current = readerWeightAr
+  type ReadingSettingsTab = 'theme' | 'typography' | 'colors' | 'page'
+  const [readingSettingsTab, setReadingSettingsTab] = useState<ReadingSettingsTab>('theme')
   const [fontSize, setFontSize] = useState(100)
   const [progressPercentage, setProgressPercentage] = useState(0)
   const [bookmarks, setBookmarks] = useState<BookmarkType[]>([])
@@ -137,6 +409,15 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   const isFullscreenRef = useRef<boolean>(false)
   const prevIsFullscreenRef = useRef<boolean>(false)
   const contentDocsRef = useRef<Set<Document>>(new Set())
+  /** Renk/font/ağırlık aynıyken tüm iframe’lere aynı CSS string’i yeniden birleştirmeyi atla. */
+  const readerThemeCssCacheRef = useRef<{
+    sig: string
+    light: string
+    sepia: string
+    dark: string
+    oled: string
+  } | null>(null)
+  const isDarkModeRef = useRef(isDarkMode)
   const searchHighlightCfiRef = useRef<string | null>(null)
   const hasNavigatedToInitialHighlightRef = useRef<boolean>(false)
   const hasNavigatedToInitialLocationRef = useRef<boolean>(false)
@@ -145,6 +426,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
   useEffect(() => {
     isFullscreenRef.current = isFullscreen
   }, [isFullscreen])
+
+  useEffect(() => {
+    isDarkModeRef.current = isDarkMode
+  }, [isDarkMode])
 
   // ReactReader default olarak reader alanını soldan/sağdan 50px daraltıyor.
   // Fullscreen'de gerçek "tam ekran" hissi için bu inset'leri küçültüyoruz.
@@ -224,32 +509,101 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     doc.documentElement.style.setProperty('--reader-pad-y', `${padY}px`)
   }, [])
 
+  /** EPUB iframe içinde tema; tek style#reader-theme-styles — CSS imzası aynıysa string önbellekten. */
+  const injectReaderThemeStyles = useCallback((doc: Document, surface: ReaderSurfaceTheme) => {
+    const head = doc.head || doc.querySelector('head')
+    if (!head) return
+    const READER_THEME_STYLE_ID = 'reader-theme-styles'
+    const tr = trColorRef.current
+    const ar = arColorRef.current
+    const fa = faColorRef.current
+    const idTr = readerFontIdTrRef.current
+    const idAr = readerFontIdArRef.current
+    const wTr = readerWeightTrRef.current
+    const wAr = readerWeightArRef.current
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const sig = `${tr}\0${ar}\0${fa}\0${idTr}\0${idAr}\0${wTr}\0${wAr}\0${origin}`
+    let cache = readerThemeCssCacheRef.current
+    if (!cache || cache.sig !== sig) {
+      const defTr = getReaderFontDefTr(idTr)
+      const defAr = getReaderFontDefAr(idAr)
+      const faceCss = collectFontFaces(origin, [defTr, defAr])
+      let familyTr: string = defTr.fallbacks
+      if (defTr.file && defTr.face && origin) {
+        familyTr = `'${defTr.face}', ${defTr.fallbacks}`
+      }
+      let familyAr: string = defAr.fallbacks
+      if (defAr.file && defAr.face && origin) {
+        familyAr = `'${defAr.face}', ${defAr.fallbacks}`
+      }
+      cache = {
+        sig,
+        light: buildReaderThemeCss('light', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss),
+        sepia: buildReaderThemeCss('sepia', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss),
+        dark: buildReaderThemeCss('dark', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss),
+        oled: buildReaderThemeCss('oled', tr, ar, fa, familyTr, familyAr, wTr, wAr, faceCss)
+      }
+      readerThemeCssCacheRef.current = cache
+    }
+    const css = cache[surface]
+    let el = doc.getElementById(READER_THEME_STYLE_ID) as HTMLStyleElement | null
+    if (!el) {
+      el = doc.createElement('style')
+      el.id = READER_THEME_STYLE_ID
+      head.appendChild(el)
+    }
+    if (el.textContent !== css) {
+      el.textContent = css
+    }
+  }, [])
+
+  const syncReaderThemeToIframes = useCallback(
+    (surface: ReaderSurfaceTheme) => {
+      const seen = new Set<Document>()
+      const injectOne = (d: Document | null | undefined) => {
+        if (!d?.head || seen.has(d)) return
+        seen.add(d)
+        try {
+          injectReaderThemeStyles(d, surface)
+        } catch { /* cross-origin veya kapalı belge */ }
+      }
+      contentDocsRef.current.forEach((doc) => injectOne(doc))
+      document.querySelectorAll<HTMLIFrameElement>('.react-reader-container iframe').forEach((iframe) => {
+        try {
+          injectOne(iframe.contentDocument || iframe.contentWindow?.document || null)
+        } catch { }
+      })
+    },
+    [injectReaderThemeStyles]
+  )
+
   // Hedef: içerik scroll olmasın; sayfalar "paginated" olarak ileri/geri gitsin.
   const applyReaderInsets = useCallback(() => {
-    // Önce epubjs'in bildiği içerikleri güncelle (en stabil yol)
-    contentDocsRef.current.forEach((doc) => {
+    const surface = resolveReaderSurface(readingAppearanceRef.current, isDarkModeRef.current)
+    const seen = new Set<Document>()
+    const applyOne = (doc: Document | null | undefined) => {
+      if (!doc?.head || !doc.body || seen.has(doc)) return
+      seen.add(doc)
       try {
         ensureReaderLayoutOverrides(doc)
+        injectReaderThemeStyles(doc, surface)
         doc.documentElement.style.overflow = 'hidden'
         doc.body.style.overflow = 'hidden'
       } catch { }
-    })
+    }
+    contentDocsRef.current.forEach((doc) => applyOne(doc))
 
-    // Fallback: iframe üzerinden yakalamaya çalış (bazı durumlarda getContents boş olabiliyor)
-    const iframes = document.querySelectorAll<HTMLIFrameElement>('.react-reader-container iframe')
-    iframes.forEach((iframe) => {
+    document.querySelectorAll<HTMLIFrameElement>('.react-reader-container iframe').forEach((iframe) => {
       try {
         const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
         if (!iframeDoc?.body) return
         contentDocsRef.current.add(iframeDoc)
-        ensureReaderLayoutOverrides(iframeDoc)
-        iframeDoc.documentElement.style.overflow = 'hidden'
-        iframeDoc.body.style.overflow = 'hidden'
+        applyOne(iframeDoc)
       } catch (error) {
         console.log('reader inset uygulama hatası:', error)
       }
     })
-  }, [ensureReaderLayoutOverrides])
+  }, [ensureReaderLayoutOverrides, injectReaderThemeStyles])
 
   // Sayfa bilgileri için yeni state'ler
   const [currentPage, setCurrentPage] = useState(1)
@@ -288,6 +642,43 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       (item.fullLabel || '').toLowerCase().includes(q)
     )
   }, [flatToc, searchQuery])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(READER_COLOR_LS_TR, trColor)
+      localStorage.setItem(READER_COLOR_LS_AR, arColor)
+      localStorage.setItem(READER_COLOR_LS_FA, faColor)
+    } catch { /* ignore */ }
+  }, [trColor, arColor, faColor])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(READER_FONT_LS_TR, readerFontIdTr)
+      localStorage.setItem(READER_FONT_LS_AR, readerFontIdAr)
+    } catch { /* ignore */ }
+  }, [readerFontIdTr, readerFontIdAr])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(READER_WEIGHT_LS_TR, String(readerWeightTr))
+      localStorage.setItem(READER_WEIGHT_LS_AR, String(readerWeightAr))
+    } catch { /* ignore */ }
+  }, [readerWeightTr, readerWeightAr])
+
+  useEffect(() => {
+    const surface = resolveReaderSurface(readingAppearanceRef.current, isDarkModeRef.current)
+    syncReaderThemeToIframes(surface)
+  }, [
+    trColor,
+    arColor,
+    faColor,
+    readerFontIdTr,
+    readerFontIdAr,
+    readerWeightTr,
+    readerWeightAr,
+    readingAppearance,
+    syncReaderThemeToIframes
+  ])
 
   // Component mount olduğunda debug bilgisi
   useEffect(() => {
@@ -390,58 +781,19 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     return () => clearTimeout(timeout)
   }, [isLoading])
 
-  // Dark mode değiştiğinde reader theme'ini güncelle
+  // "Sistem" ön ayarı: uygulama koyu/açık değişince okuma yüzeyi de light/dark olur
   useEffect(() => {
-    const newTheme = isDarkMode ? 'dark' : 'light'
-    console.log('Dark mode değişti, yeni tema:', newTheme)
-    setReaderTheme(newTheme)
+    if (readingAppearance !== 'system') return
+    const surface = isDarkMode ? 'dark' : 'light'
     if (renditionRef.current) {
-      changeTheme(newTheme)
+      try {
+        renditionRef.current.themes.select(surface)
+      } catch { /* ignore */ }
+      setTimeout(() => syncReaderThemeToIframes(surface), 100)
+    } else {
+      setTimeout(() => syncReaderThemeToIframes(surface), 100)
     }
-
-    // iframe'leri doğrudan manipüle et
-    setTimeout(() => {
-      const iframes = document.querySelectorAll('.react-reader-container iframe')
-      iframes.forEach((iframe: any) => {
-        try {
-          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-          if (iframeDoc) {
-            if (isDarkMode) {
-              iframeDoc.body.style.backgroundColor = '#0f172a'
-              iframeDoc.body.style.color = '#e5e7eb'
-              iframeDoc.documentElement.style.backgroundColor = '#0f172a'
-              iframeDoc.documentElement.style.color = '#e5e7eb'
-
-              // Tüm elementleri koyu yap
-              const allElements = iframeDoc.querySelectorAll('*')
-              allElements.forEach((el: any) => {
-                if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
-                  el.style.backgroundColor = 'transparent'
-                  el.style.color = '#e5e7eb'
-                }
-              })
-            } else {
-              iframeDoc.body.style.backgroundColor = '#ffffff'
-              iframeDoc.body.style.color = '#1f2937'
-              iframeDoc.documentElement.style.backgroundColor = '#ffffff'
-              iframeDoc.documentElement.style.color = '#1f2937'
-
-              // Tüm elementleri açık yap
-              const allElements = iframeDoc.querySelectorAll('*')
-              allElements.forEach((el: any) => {
-                if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
-                  el.style.backgroundColor = 'transparent'
-                  el.style.color = '#1f2937'
-                }
-              })
-            }
-          }
-        } catch (error) {
-          console.log('iframe manipülasyon hatası:', error)
-        }
-      })
-    }, 100)
-  }, [isDarkMode])
+  }, [isDarkMode, readingAppearance, syncReaderThemeToIframes])
 
   // Gelişmiş ilerleme hesaplama fonksiyonu
   const calculateAdvancedProgress = (book: any, cfi: string) => {
@@ -562,7 +914,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     console.log('=== READER READY ===')
     console.log('EPUB Reader hazır:', rendition)
     console.log('Rendition object:', rendition)
-    console.log('Mevcut readerTheme:', readerTheme)
+    console.log('Okuma ön ayarı:', readingAppearanceRef.current)
     console.log('Mevcut isDarkMode:', isDarkMode)
     console.log('scrollMode:', scrollMode)
 
@@ -603,16 +955,24 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             contentDocsRef.current.add(doc)
             // İçerik her yüklendiğinde layout override'larını enjekte et
             ensureReaderLayoutOverrides(doc)
+            try {
+              const surface = resolveReaderSurface(readingAppearanceRef.current, isDarkModeRef.current)
+              injectReaderThemeStyles(doc, surface)
+            } catch (injectErr) {
+              console.warn('reader-theme-styles inject:', injectErr)
+            }
 
             const head = doc.querySelector('head')
-            if (head) {
+            const TOUCH_SELECT_STYLE_ID = 'reader-touch-select-overrides'
+            if (head && !doc.getElementById(TOUCH_SELECT_STYLE_ID)) {
               const style = doc.createElement('style')
+              style.id = TOUCH_SELECT_STYLE_ID
 
               // Eğer iOS + Capacitor ortamındaysak ve native Clipboard eklentisi yoksa,
               // sistemin kendi "Kopyala" menüsünü engelleme (kullanıcı sistem menüsünü kullanabilsin).
               const disableNativeCallout = !(isIOS && (window as any).Capacitor && !nativeClipboard)
 
-              style.innerHTML = `
+              style.textContent = `
                 * {
                   ${disableNativeCallout ? '-webkit-touch-callout: none !important;' : ''}
                   -webkit-user-select: text;
@@ -921,7 +1281,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       body: {
         color: '#1f2937',
         background: '#ffffff',
-        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        'font-family': SYSTEM_FONT_STACK,
         'line-height': '1.6',
         'padding': '20px',
         'margin': '0',
@@ -944,7 +1304,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       body: {
         color: '#e5e7eb',
         background: '#0f172a',
-        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        'font-family': SYSTEM_FONT_STACK,
         'line-height': '1.6',
         'padding': '20px',
         'margin': '0',
@@ -960,6 +1320,52 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       'html, body': {
         'background-color': '#0f172a',
         color: '#e5e7eb'
+      }
+    })
+
+    rendition.themes.register('sepia', {
+      body: {
+        color: '#3e2723',
+        background: '#f4ecd8',
+        'font-family': SYSTEM_FONT_STACK,
+        'line-height': '1.6',
+        'padding': '20px',
+        'margin': '0',
+      },
+      'p, div, span, section, article': {
+        color: '#3e2723',
+        'background-color': 'transparent'
+      },
+      'h1, h2, h3, h4, h5, h6': {
+        color: '#2d1f18',
+        'background-color': 'transparent'
+      },
+      'html, body': {
+        'background-color': '#f4ecd8',
+        color: '#3e2723'
+      }
+    })
+
+    rendition.themes.register('oled', {
+      body: {
+        color: '#e5e5e5',
+        background: '#000000',
+        'font-family': SYSTEM_FONT_STACK,
+        'line-height': '1.6',
+        'padding': '20px',
+        'margin': '0',
+      },
+      'p, div, span, section, article': {
+        color: '#e5e5e5',
+        'background-color': 'transparent'
+      },
+      'h1, h2, h3, h4, h5, h6': {
+        color: '#fafafa',
+        'background-color': 'transparent'
+      },
+      'html, body': {
+        'background-color': '#000000',
+        color: '#e5e5e5'
       }
     })
 
@@ -1008,11 +1414,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
       console.log('Rendition click handler eklenemedi:', err)
     }
 
-    // Mevcut dark mode durumuna göre tema uygula
-    const currentTheme = isDarkMode ? 'dark' : 'light'
-    console.log('Uygulanacak tema:', currentTheme)
-    rendition.themes.select(currentTheme)
-    setReaderTheme(currentTheme)
+    const initialSurface = resolveReaderSurface(readingAppearanceRef.current, isDarkModeRef.current)
+    console.log('Uygulanacak okuma yüzeyi:', initialSurface)
+    rendition.themes.select(initialSurface)
 
     // Font boyutunu uygula
     rendition.themes.fontSize(`${fontSize}%`)
@@ -1059,7 +1463,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
 
     console.log('=== READER READY TAMAMLANDI ===')
-  }, [readerTheme, fontSize, currentChapter, applyReaderInsets, scrollMode])
+  }, [fontSize, currentChapter, applyReaderInsets, scrollMode, injectReaderThemeStyles])
 
   // Highlight'ları render et
   const renderHighlights = useCallback(() => {
@@ -1876,55 +2280,62 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     console.log('EpubReader debug - blobUrl:', blobUrl, 'isLoading:', isLoading, 'error:', error)
   }, [blobUrl, isLoading, error])
 
-  // Dosyayı blob olarak indir
+  // Dosyayı blob olarak indir — revoke yalnızca bu effect'in oluşturduğu URL için (yarış / geçersiz blob önlenir)
   useEffect(() => {
-    const downloadFile = async () => {
+    if (!bookUrl || bookUrl === 'demo-placeholder.epub') {
+      setError(t('reader.invalidUrl'))
+      setIsLoading(false)
+      setBlobUrl(null)
+      return
+    }
+
+    let active = true
+    let objectUrlCreated: string | null = null
+
+    setBlobUrl(null)
+    setIsLoading(true)
+    setError(null)
+
+    ;(async () => {
       try {
-        console.log('=== DOSYA İNDİRME BAŞLADI ===')
-        console.log('bookUrl:', bookUrl)
-        console.log('bookTitle:', bookTitle)
-
+        console.log('=== DOSYA İNDİRME BAŞLADI ===', bookUrl)
         const response = await fetch(bookUrl)
-        console.log('Fetch response status:', response.status)
-        console.log('Fetch response ok:', response.ok)
-
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
-
         const blob = await response.blob()
-        console.log('Blob size:', blob.size, 'bytes')
-        console.log('Blob type:', blob.type)
-
         const url = URL.createObjectURL(blob)
-        console.log('Blob URL oluşturuldu:', url)
-
+        if (!active) {
+          URL.revokeObjectURL(url)
+          return
+        }
+        objectUrlCreated = url
         setBlobUrl(url)
-        setIsLoading(false) // Blob URL oluşturulduğunda loading'i false yap
-        console.log('=== DOSYA İNDİRME TAMAMLANDI ===')
-      } catch (error) {
-        console.error('=== DOSYA İNDİRME HATASI ===')
-        console.error('Dosya indirme hatası:', error)
-        setError(t('reader.downloadError'))
         setIsLoading(false)
+        console.log('=== DOSYA İNDİRME TAMAMLANDI ===', url)
+      } catch (error) {
+        console.error('Dosya indirme hatası:', error)
+        if (active) {
+          setError(t('reader.downloadError'))
+          setIsLoading(false)
+        }
       }
-    }
-
-    if (bookUrl && bookUrl !== 'demo-placeholder.epub') {
-      console.log('Dosya indirme başlatılıyor...')
-      downloadFile()
-    } else {
-      console.log('Geçersiz bookUrl:', bookUrl)
-      setError(t('reader.invalidUrl'))
-      setIsLoading(false)
-    }
+    })()
 
     return () => {
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl)
+      active = false
+      if (objectUrlCreated) {
+        URL.revokeObjectURL(objectUrlCreated)
+        objectUrlCreated = null
       }
     }
-  }, [bookUrl])
+  }, [bookUrl, t])
+
+  useEffect(() => {
+    contentDocsRef.current.clear()
+    hasNavigatedToInitialHighlightRef.current = false
+    hasNavigatedToInitialLocationRef.current = false
+  }, [bookId, bookUrl])
 
   // Kullanıcı verilerini yükle (ilerleme ve bookmark'lar)
   useEffect(() => {
@@ -2119,74 +2530,34 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
     }
   }, [goToNext, goToPrevious, hasActiveTextSelection])
 
-  const changeTheme = (theme: string) => {
-    console.log('=== CHANGE THEME ===')
-    console.log('Current theme:', readerTheme)
-    console.log('New theme:', theme)
-    console.log('Rendition ref:', !!renditionRef.current)
-    console.log('isDarkMode:', isDarkMode)
+  const applyReadingAppearancePreset = useCallback(
+    (preset: ReaderAppearancePreset) => {
+      readingAppearanceRef.current = preset
+      setReadingAppearance(preset)
+      try {
+        localStorage.setItem(READER_APPEARANCE_LS, preset)
+      } catch { /* ignore */ }
 
-    setReaderTheme(theme)
-    if (renditionRef.current) {
-      console.log('Applying theme to rendition...')
-      renditionRef.current.themes.select(theme)
-      console.log('Theme applied successfully')
-
-      // iframe'leri doğrudan manipüle et
-      setTimeout(() => {
-        const iframes = document.querySelectorAll('.react-reader-container iframe')
-        iframes.forEach((iframe: any) => {
-          try {
-            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-            if (iframeDoc) {
-              if (theme === 'dark') {
-                iframeDoc.body.style.backgroundColor = '#0f172a'
-                iframeDoc.body.style.color = '#e5e7eb'
-                iframeDoc.documentElement.style.backgroundColor = '#0f172a'
-                iframeDoc.documentElement.style.color = '#e5e7eb'
-
-                // Tüm elementleri koyu yap
-                const allElements = iframeDoc.querySelectorAll('*')
-                allElements.forEach((el: any) => {
-                  if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
-                    el.style.backgroundColor = 'transparent'
-                    el.style.color = '#e5e7eb'
-                  }
-                })
-              } else {
-                iframeDoc.body.style.backgroundColor = '#ffffff'
-                iframeDoc.body.style.color = '#1f2937'
-                iframeDoc.documentElement.style.backgroundColor = '#ffffff'
-                iframeDoc.documentElement.style.color = '#1f2937'
-
-                // Tüm elementleri açık yap
-                const allElements = iframeDoc.querySelectorAll('*')
-                allElements.forEach((el: any) => {
-                  if (el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE') {
-                    el.style.backgroundColor = 'transparent'
-                    el.style.color = '#1f2937'
-                  }
-                })
-              }
-            }
-          } catch (error) {
-            console.log('iframe manipülasyon hatası:', error)
-          }
-        })
-      }, 100)
-
-      // Tema değişikliğini global dark mode ile senkronize et
-      if (theme === 'dark' && !isDarkMode && toggleDarkMode) {
-        console.log('Global dark mode aktifleştiriliyor...')
-        toggleDarkMode()
-      } else if (theme === 'light' && isDarkMode && toggleDarkMode) {
-        console.log('Global dark mode deaktifleştiriliyor...')
-        toggleDarkMode()
+      if (setDarkMode) {
+        if (preset === 'light' || preset === 'sepia') setDarkMode(false)
+        else if (preset === 'dark' || preset === 'oled') setDarkMode(true)
       }
-    } else {
-      console.log('Rendition ref not available')
-    }
-  }
+
+      const surface: ReaderSurfaceTheme =
+        preset === 'system'
+          ? resolveReaderSurface('system', isDarkModeRef.current)
+          : preset
+      if (renditionRef.current) {
+        try {
+          renditionRef.current.themes.select(surface)
+        } catch { /* ignore */ }
+        setTimeout(() => syncReaderThemeToIframes(surface), 100)
+      } else {
+        setTimeout(() => syncReaderThemeToIframes(surface), 100)
+      }
+    },
+    [setDarkMode, syncReaderThemeToIframes]
+  )
 
   const changeFontSize = (newSize: number) => {
     setFontSize(newSize)
@@ -3714,172 +4085,322 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
         </div>
       )}
 
-      {/* Modern Settings Panel */}
+      {/* Okuma görünümü: üstten çekmece, kitap alanı hep görünür — canlı önizleme */}
       {showSettings && !isFullscreen && (
-        <div className="settings-panel bg-white/95 dark:bg-dark-900/95 backdrop-blur-xl border-b border-white/30 dark:border-dark-700/30 shadow-lg z-10">
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{t('reader.readingSettings')}</h3>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="p-1.5 rounded-lg bg-white/60 dark:bg-dark-800/60 border border-white/30 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
-                title="Kapat"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Theme Selection */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.theme')}</label>
-                <div className="flex gap-2">
-                  {[
-                    { id: 'light', name: t('reader.themeLight'), icon: <Sun className="w-5 h-5" /> },
-                    { id: 'dark', name: t('reader.themeDark'), icon: <Moon className="w-5 h-5" /> }
-                  ].map((theme) => (
-                    <button
-                      key={theme.id}
-                      onClick={() => {
-                        console.log('Theme button clicked:', theme.id)
-                        changeTheme(theme.id)
-                      }}
-                      className={`flex-1 py-3 px-4 rounded-xl border transition-all duration-200 ${readerTheme === theme.id
-                        ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                        : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
-                        }`}
-                    >
-                      <div className="text-center flex flex-col items-center justify-center">
-                        <div className="mb-1">{theme.icon}</div>
-                        <div className="text-sm font-medium">{theme.name}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Font Size */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.fontSize')}: {fontSize}%</label>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => changeFontSize(Math.max(50, fontSize - 10))}
-                    className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
-                  >
-                    A-
-                  </button>
-                  <div className="flex-1 flex items-center h-8">
-                    <input
-                      type="range"
-                      min="50"
-                      max="200"
-                      value={fontSize}
-                      onChange={(e) => changeFontSize(parseInt(e.target.value))}
-                      className="w-full h-2 appearance-none rounded-full cursor-pointer bg-gray-200 dark:bg-dark-700"
-                      style={{
-                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(fontSize - 50) / 1.5}%, #e5e7eb ${(fontSize - 50) / 1.5}%, #e5e7eb 100%)`
-                      }}
-                    />
-                  </div>
-                  <button
-                    onClick={() => changeFontSize(Math.min(200, fontSize + 10))}
-                    className="p-2 rounded-lg bg-white dark:bg-dark-800/60 border border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80 transition-colors flex items-center justify-center"
-                  >
-                    A+
-                  </button>
-                </div>
+        <div className="settings-panel z-10 mx-2 shrink-0 sm:mx-4 flex max-h-[min(50vh,520px)] flex-col overflow-hidden rounded-b-2xl border border-t-0 border-gray-200/90 bg-white/93 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.22)] backdrop-blur-xl dark:border-dark-700/55 dark:bg-dark-900/93 dark:shadow-[0_18px_50px_-12px_rgba(0,0,0,0.5)] animate-in slide-in-from-top-2 duration-200">
+          <div className="flex shrink-0 items-start justify-between gap-2 border-b border-gray-200/70 px-3 py-2.5 dark:border-dark-700/50">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="h-9 w-1 shrink-0 rounded-full bg-gradient-to-b from-sky-500 to-indigo-600" />
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-100">{t('reader.readingSettings')}</h3>
+                <p className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                  Aşağıdaki sayfada canlı önizleme — tema, yazı ve renk değişince hemen görünür.
+                </p>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setShowSettings(false)}
+              className="shrink-0 rounded-lg border border-gray-200/80 bg-white/80 p-1.5 text-gray-600 transition-colors hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800/80 dark:text-gray-300 dark:hover:bg-dark-700"
+              title="Kapat"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
 
-            {/* Scroll Mode Selection */}
-            <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                {t('reader.scrollMode')}
-              </label>
-              <div className="flex gap-2">
-                {[
-                  { id: 'paginated', name: t('reader.modePaginated') || 'Sayfalama', icon: <BookOpen className="w-5 h-5" /> },
-                  { id: 'scroll', name: t('reader.modeScroll') || 'Kaydırma', icon: <ScrollText className="w-5 h-5" /> }
-                ].map((mode) => (
-                  <button
-                    key={mode.id}
-                    onClick={() => {
-                      const newScrollMode = mode.id === 'scroll'
-                      if (newScrollMode !== scrollMode) {
-                        setScrollMode(newScrollMode)
-                        localStorage.setItem(`scrollMode_${bookId}`, String(newScrollMode))
-
-                        // Mobilde kaydırma modundan sayfalama moduna geçişte boş sayfa sorununu çözmek için
-                        // sayfayı yeniden yüklüyoruz.
-                        if (!newScrollMode) {
-                          const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-                          if (isMobile) {
-                            // Son konumu güvenceye al
-                            if (userId && bookId) {
-                              saveReadingProgress(userId, bookId, String(location), progressPercentage).catch(() => { })
-                            }
-                            // Kısa bir gecikmeyle yeniden yükle
-                            setTimeout(() => {
-                              window.location.reload()
-                            }, 100)
-                          }
-                        }
-                      }
-                    }}
-                    className={`flex-1 py-3 px-4 rounded-xl border transition-all duration-200 ${(mode.id === 'scroll' ? scrollMode : !scrollMode)
-                      ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                      : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
-                      }`}
-                  >
-                    <div className="text-center flex flex-col items-center justify-center">
-                      <div className="mb-1">{mode.icon}</div>
-                      <div className="text-sm font-medium">{mode.name}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                {t('reader.scrollModeHint')}
-              </p>
-            </div>
-
-            {/* Bookmark Section */}
-            <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t('reader.bookmarks')}</label>
-              <div className="flex items-center gap-3">
+          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-gray-100 px-2 py-2 dark:border-dark-800/80 [&::-webkit-scrollbar]:h-0">
+            {(
+              [
+                { id: 'theme' as const, label: t('reader.theme'), icon: Sparkles },
+                { id: 'typography' as const, label: t('reader.typographyTab'), icon: Type },
+                { id: 'colors' as const, label: t('reader.tabColors'), icon: Palette },
+                { id: 'page' as const, label: t('reader.pageTab'), icon: LayoutList },
+              ]
+            ).map((tab) => {
+              const Icon = tab.icon
+              const active = readingSettingsTab === tab.id
+              return (
                 <button
-                  onClick={toggleBookmark}
-                  className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${isBookmarked
-                    ? 'bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400'
-                    : 'bg-white dark:bg-dark-800/60 border-gray-200 dark:border-dark-700/30 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700/80'
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setReadingSettingsTab(tab.id)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${active
+                    ? 'bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-md dark:from-sky-500 dark:to-indigo-500'
+                    : 'bg-gray-100/90 text-gray-600 hover:bg-gray-200/90 dark:bg-dark-800/80 dark:text-gray-300 dark:hover:bg-dark-700/90'
                     }`}
                 >
-                  {isBookmarked ? <BookmarkCheck className="w-4 h-4" /> : <BookmarkPlus className="w-4 h-4" />}
-                  <span className="text-sm font-medium">{isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}</span>
+                  <Icon className="h-3.5 w-3.5 opacity-90" />
+                  {tab.label}
                 </button>
+              )
+            })}
+          </div>
 
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  {t('reader.bookmarksCount', { count: bookmarks.length })}
-                </span>
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-4">
+            {readingSettingsTab === 'theme' && (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t('reader.themePresetsHint')}</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {([
+                    { id: 'light' as const, name: t('reader.themeLight'), icon: Sun, desc: t('reader.themeLightDesc') },
+                    { id: 'sepia' as const, name: t('reader.themeSepia'), icon: Coffee, desc: t('reader.themeSepiaDesc') },
+                    { id: 'dark' as const, name: t('reader.themeDark'), icon: Moon, desc: t('reader.themeDarkDesc') },
+                    { id: 'oled' as const, name: t('reader.themeOled'), icon: Contrast, desc: t('reader.themeOledDesc') },
+                    { id: 'system' as const, name: t('reader.themeSystem'), icon: Monitor, desc: t('reader.themeSystemDesc') },
+                  ]).map((opt) => {
+                    const Icon = opt.icon
+                    const selected = readingAppearance === opt.id
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => applyReadingAppearancePreset(opt.id)}
+                        className={`flex flex-col items-center gap-1 rounded-xl border px-2.5 py-2.5 text-center transition-all ${selected
+                          ? 'border-sky-400 bg-gradient-to-br from-sky-50 to-indigo-50 shadow-md dark:border-sky-500/60 dark:from-sky-950/50 dark:to-indigo-950/40'
+                          : 'border-gray-200/90 bg-white/70 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800/50 dark:hover:border-dark-500'
+                          }`}
+                      >
+                        <Icon className="h-6 w-6 shrink-0 text-sky-600 dark:text-sky-400" />
+                        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{opt.name}</span>
+                        <span className="line-clamp-2 text-[10px] leading-tight text-gray-500 dark:text-gray-400">{opt.desc}</span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Reset Button */}
-            <div className="mt-6">
-              <button
-                onClick={resetReader}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
-              >
-                <RotateCcw className="w-4 h-4" />
-                {t('reader.reset')}
-              </button>
-            </div>
+            {readingSettingsTab === 'typography' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reader.fontSize')} · {fontSize}%</label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => changeFontSize(Math.max(50, fontSize - 10))}
+                      className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm dark:border-dark-600 dark:bg-dark-800"
+                    >
+                      A−
+                    </button>
+                    <input
+                      type="range"
+                      min={50}
+                      max={200}
+                      value={fontSize}
+                      onChange={(e) => changeFontSize(parseInt(e.target.value, 10))}
+                      className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-gray-200 dark:bg-dark-700"
+                      style={{
+                        background: `linear-gradient(to right, #0ea5e9 0%, #6366f1 ${(fontSize - 50) / 1.5}%, rgb(229 231 235) ${(fontSize - 50) / 1.5}%, rgb(229 231 235) 100%)`,
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => changeFontSize(Math.min(200, fontSize + 10))}
+                      className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm dark:border-dark-600 dark:bg-dark-800"
+                    >
+                      A+
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200/80 bg-gray-50/50 p-3 dark:border-dark-600/60 dark:bg-dark-800/30">
+                    <p className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Türkçe · kalınlık</p>
+                    <div className="mb-3 flex flex-wrap gap-1">
+                      {([
+                        [300, 'İnce'],
+                        [400, 'Normal'],
+                        [500, 'Orta'],
+                        [600, 'Yarı kalın'],
+                        [700, 'Kalın'],
+                      ] as const).map(([w, lab]) => (
+                        <button
+                          key={w}
+                          type="button"
+                          onClick={() => setReaderWeightTr(w)}
+                          className={`rounded-lg px-2 py-1 text-[10px] font-medium ${readerWeightTr === w
+                            ? 'bg-sky-600 text-white dark:bg-sky-500'
+                            : 'bg-white text-gray-600 ring-1 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600'
+                            }`}
+                        >
+                          {lab}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mb-1.5 text-[10px] text-gray-500 dark:text-gray-400">Yazı tipi</p>
+                    <div className="max-h-36 space-y-1 overflow-y-auto pr-0.5">
+                      {READER_FONTS_TR.map((f) => (
+                        <label
+                          key={f.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 py-1 hover:bg-white/80 dark:hover:bg-dark-700/50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 rounded border-gray-300 text-sky-600"
+                            checked={readerFontIdTr === f.id}
+                            onChange={() => setReaderFontIdTr(f.id)}
+                          />
+                          <span className="text-xs text-gray-800 dark:text-gray-200">{f.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200/80 bg-gray-50/50 p-3 dark:border-dark-600/60 dark:bg-dark-800/30">
+                    <p className="mb-2 text-xs font-semibold text-gray-700 dark:text-gray-200">Arapça · kalınlık</p>
+                    <div className="mb-3 flex flex-wrap gap-1">
+                      {([
+                        [300, 'İnce'],
+                        [400, 'Normal'],
+                        [500, 'Orta'],
+                        [600, 'Yarı kalın'],
+                        [700, 'Kalın'],
+                      ] as const).map(([w, lab]) => (
+                        <button
+                          key={w}
+                          type="button"
+                          onClick={() => setReaderWeightAr(w)}
+                          className={`rounded-lg px-2 py-1 text-[10px] font-medium ${readerWeightAr === w
+                            ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+                            : 'bg-white text-gray-600 ring-1 ring-gray-200 dark:bg-dark-700 dark:text-gray-300 dark:ring-dark-600'
+                            }`}
+                        >
+                          {lab}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mb-1.5 text-[10px] text-gray-500 dark:text-gray-400">lang=&quot;ar&quot;, .proepub-arabic veya RTL gövde</p>
+                    <div className="max-h-36 space-y-1 overflow-y-auto pr-0.5">
+                      {READER_FONTS_AR.map((f) => (
+                        <label
+                          key={f.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 py-1 hover:bg-white/80 dark:hover:bg-dark-700/50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600"
+                            checked={readerFontIdAr === f.id}
+                            onChange={() => setReaderFontIdAr(f.id)}
+                          />
+                          <span className="text-xs text-gray-800 dark:text-gray-200">{f.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {readingSettingsTab === 'colors' && (
+              <div className="space-y-4">
+                <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('reader.advancedColorsTitle')}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t('reader.advancedColorsHint')}</p>
+                {(
+                  [
+                    { label: 'Türkçe / genel', value: trColor, set: setTrColor, palette: READER_PALETTE_TR },
+                    { label: 'Arapça', value: arColor, set: setArColor, palette: READER_PALETTE_AR },
+                    { label: 'Farsça', value: faColor, set: setFaColor, palette: READER_PALETTE_FA },
+                  ] as const
+                ).map((row) => (
+                  <div key={row.label}>
+                    <label className="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-400">{row.label}</label>
+                    <div className="flex flex-wrap gap-2" role="group" aria-label={row.label}>
+                      {row.palette.map((hex) => (
+                        <button
+                          key={hex}
+                          type="button"
+                          title={hex}
+                          aria-label={`${row.label} ${hex}`}
+                          aria-pressed={row.value === hex}
+                          onClick={() => row.set(hex)}
+                          className={`h-8 w-8 shrink-0 rounded-full border-2 shadow-sm transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${row.value.toLowerCase() === hex.toLowerCase()
+                            ? 'scale-105 border-sky-500 ring-2 ring-sky-400/40'
+                            : 'border-gray-200 dark:border-dark-600'
+                            }`}
+                          style={{ backgroundColor: hex }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {readingSettingsTab === 'page' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reader.scrollMode')}</label>
+                  <div className="flex gap-2">
+                    {[
+                      { id: 'paginated', name: t('reader.modePaginated') || 'Sayfalama', icon: BookOpen },
+                      { id: 'scroll', name: t('reader.modeScroll') || 'Kaydırma', icon: ScrollText },
+                    ].map((mode) => {
+                      const Icon = mode.icon
+                      return (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => {
+                            const newScrollMode = mode.id === 'scroll'
+                            if (newScrollMode !== scrollMode) {
+                              setScrollMode(newScrollMode)
+                              localStorage.setItem(`scrollMode_${bookId}`, String(newScrollMode))
+                              if (!newScrollMode) {
+                                const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                                if (isMobile) {
+                                  if (userId && bookId) {
+                                    saveReadingProgress(userId, bookId, String(location), progressPercentage).catch(() => { })
+                                  }
+                                  setTimeout(() => window.location.reload(), 100)
+                                }
+                              }
+                            }
+                          }}
+                          className={`flex flex-1 flex-col items-center gap-1 rounded-xl border px-2 py-2.5 transition-all ${(mode.id === 'scroll' ? scrollMode : !scrollMode)
+                            ? 'border-sky-400 bg-sky-50 dark:border-sky-600 dark:bg-sky-950/40'
+                            : 'border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800/60'
+                            }`}
+                        >
+                          <Icon className="h-5 w-5 text-gray-700 dark:text-gray-200" />
+                          <span className="text-center text-xs font-medium text-gray-800 dark:text-gray-100">{mode.name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="mt-1.5 text-[10px] text-gray-500 dark:text-gray-400">{t('reader.scrollModeHint')}</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-dark-700/50">
+                  <button
+                    type="button"
+                    onClick={toggleBookmark}
+                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${isBookmarked
+                      ? 'border-sky-400 bg-sky-50 text-sky-800 dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-200'
+                      : 'border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800'
+                      }`}
+                  >
+                    {isBookmarked ? <BookmarkCheck className="h-4 w-4" /> : <BookmarkPlus className="h-4 w-4" />}
+                    {isBookmarked ? t('reader.removeBookmark') : t('reader.addBookmark')}
+                  </button>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">{t('reader.bookmarksCount', { count: bookmarks.length })}</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={resetReader}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  {t('reader.reset')}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Book Reader - Improved Layout */}
-      <div className="flex-1 relative overflow-hidden">
+      {/* Book Reader — min-h-0: üstteki çekmece açıkken kitap alanı küçülüp hep görünür kalır */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {blobUrl ? (
           <div
             className={`w-full h-full react-reader-container ${isDarkMode ? 'dark' : ''} ${isFullscreen ? 'fullscreen' : ''
@@ -3887,7 +4408,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({
             style={{ overflowX: 'hidden' }}
           >
             <ReactReader
-              key={`reader-${scrollMode ? 'scroll' : 'paginated'}`}
+              key={`reader-${bookId}-${scrollMode ? 'scroll' : 'paginated'}`}
               url={blobUrl}
               location={location}
               locationChanged={locationChanged}

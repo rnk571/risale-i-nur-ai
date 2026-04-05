@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { supabase, type Book } from '../lib/supabase'
-import { BookOpen } from 'lucide-react'
+import { BookOpen, ChevronRight } from 'lucide-react'
 import { BookFilters, defaultFilters, type FilterState } from './BookFilters'
 import { filterAndSortBooks } from '../utils/bookFilters'
 
@@ -10,6 +10,246 @@ interface BookLibraryProps {
   userId?: string
   userRole?: 'user' | 'admin' | null
   isDarkMode?: boolean
+}
+
+type BookCardVariant = 'large' | 'small'
+
+function BookCard({
+  book,
+  variant,
+  onSelect,
+  t,
+  shelfRow = false,
+}: {
+  book: Book
+  variant: BookCardVariant
+  onSelect: (b: Book) => void
+  t: (k: string) => string
+  /** Tek satır rafta yatay kaydırma için sabit genişlik */
+  shelfRow?: boolean
+}) {
+  const isLarge = variant === 'large'
+  const epubPath = (book as { epub_file_path?: string }).epub_file_path || ''
+  const isPdf = epubPath.toLowerCase().endsWith('.pdf')
+  const hasAudio = Boolean((book as { audio_file_path?: string }).audio_file_path)
+
+  return (
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(book)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect(book)
+        }
+      }}
+      className={[
+        'group flex cursor-pointer flex-col rounded-lg border bg-white transition-colors duration-200 dark:bg-zinc-900',
+        'border-zinc-200 dark:border-zinc-800',
+        'hover:border-sky-400/60 hover:bg-zinc-50/90 dark:hover:border-sky-500/35 dark:hover:bg-zinc-800/50',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500',
+        isLarge ? 'border-l-[3px] border-l-amber-500 pl-2 dark:border-l-amber-400' : '',
+        'p-2 sm:p-2.5',
+        shelfRow ? (isLarge ? 'w-[10.5rem] shrink-0 sm:w-[11.5rem]' : 'w-[9.25rem] shrink-0 sm:w-[10.25rem]') : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {/* Başlık üstte — daha okunaklı; kapak bilinçli olarak dar tutuldu */}
+      <h3 className="order-1 mb-1.5 min-h-[3.25rem] text-center text-[0.95rem] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-100 sm:min-h-[3.5rem] sm:text-[1.0625rem]">
+        <span className="line-clamp-2">{book.title}</span>
+      </h3>
+
+      <div
+        className={[
+          'order-2 relative mx-auto mb-2 aspect-[3/4] w-full shrink-0 overflow-hidden rounded-md bg-zinc-100 ring-1 ring-zinc-200/90 dark:bg-zinc-800 dark:ring-zinc-700/90',
+          isLarge ? 'max-w-[7rem] sm:max-w-[7.75rem]' : 'max-w-[5.875rem] sm:max-w-[6.5rem]',
+        ].join(' ')}
+      >
+        {book.cover_image ? (
+          <img
+            src={book.cover_image}
+            alt=""
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-zinc-400 dark:text-zinc-500">
+            <BookOpen
+              className={`shrink-0 opacity-60 ${isLarge ? 'h-8 w-8' : 'h-7 w-7'}`}
+              strokeWidth={1.25}
+            />
+          </div>
+        )}
+        <div
+          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-zinc-900/0 transition-colors duration-200 group-hover:bg-zinc-900/10 dark:group-hover:bg-black/20"
+          aria-hidden
+        />
+        <div className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-white/95 text-zinc-700 opacity-0 shadow-sm ring-1 ring-zinc-200/80 transition-opacity duration-200 group-hover:opacity-100 dark:bg-zinc-800/95 dark:text-zinc-200 dark:ring-zinc-600/80">
+          <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+        </div>
+      </div>
+
+      <div className="order-3 flex flex-1 flex-col gap-1">
+        {book.author ? (
+          <p className="text-center text-[10px] text-zinc-500 dark:text-zinc-400 sm:text-[11px]">{book.author}</p>
+        ) : null}
+        {book.description ? (
+          <p className="line-clamp-1 text-center text-[10px] leading-snug text-zinc-500 dark:text-zinc-500">
+            {book.description}
+          </p>
+        ) : null}
+        <div className="mt-auto flex flex-wrap items-center justify-center gap-1 pt-0.5">
+          {isLarge ? (
+            <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 sm:text-[10px]">
+              {t('admin.filter.sizeLarge')}
+            </span>
+          ) : null}
+          <span
+            className={`rounded px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide sm:text-[10px] ${
+              book.language === 'en'
+                ? 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-200'
+                : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+            }`}
+          >
+            {book.language === 'en' ? 'EN' : 'TR'}
+          </span>
+          <span className="rounded bg-zinc-100 px-1 py-0.5 text-[9px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 sm:text-[10px]">
+            {isPdf ? 'PDF' : 'EPUB'}
+          </span>
+          {hasAudio ? (
+            <span className="rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-medium text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200 sm:text-[10px]">
+              {t('library.audioBook')}
+            </span>
+          ) : null}
+          {book.is_public ? (
+            <span className="rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-medium text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200 sm:text-[10px]">
+              {t('common.public')}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="order-4 mt-2 border-t border-zinc-100 pt-1.5 text-center dark:border-zinc-800">
+        <span className="text-[10px] font-medium text-sky-600 opacity-90 group-hover:opacity-100 dark:text-sky-400 sm:text-[11px]">
+          {t('common.startReading')}
+        </span>
+      </div>
+    </article>
+  )
+}
+
+function SectionHeading({
+  id,
+  title,
+  accent,
+  countLabel,
+  shelfBadge,
+}: {
+  id: string
+  title: string
+  accent: 'amber' | 'zinc'
+  countLabel: string
+  shelfBadge: string
+}) {
+  const { t } = useTranslation()
+  const line =
+    accent === 'amber'
+      ? 'bg-amber-500 dark:bg-amber-400'
+      : 'bg-zinc-300 dark:bg-zinc-600'
+  return (
+    <div className="mb-3 flex flex-col gap-1 sm:mb-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex items-center gap-2.5">
+        <div className={`h-6 w-0.5 shrink-0 rounded-full sm:h-7 ${line}`} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id={id} className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 sm:text-lg">
+              {title}
+            </h2>
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider sm:text-[11px] ${
+                accent === 'amber'
+                  ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200'
+                  : 'bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+              }`}
+            >
+              {shelfBadge}
+            </span>
+          </div>
+          <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 sm:text-xs">
+            <span>{countLabel}</span>
+            <span className="hidden sm:inline"> · </span>
+            <span className="mt-0.5 block text-zinc-400 dark:text-zinc-500 sm:mt-0 sm:inline">
+              {t('library.shelfScrollHint')}
+            </span>
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Tek satır, soldan sağa kaydırılabilir raf şeridi */
+function ShelfScroll({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="library-shelf-scroll flex snap-x snap-proximity touch-pan-x gap-3 overflow-x-auto overflow-y-hidden scroll-smooth pb-1 pt-0.5 [-webkit-overflow-scrolling:touch] sm:gap-3.5"
+      role="list"
+    >
+      {children}
+      <div className="w-2 shrink-0 sm:w-3" aria-hidden />
+    </div>
+  )
+}
+
+/** Büyük / küçük boy bölümlerini iki ayrı raf gibi gösterir (üst raf + alt raf). */
+function Bookshelf({
+  id,
+  title,
+  countLabel,
+  accent,
+  shelfBadge,
+  children,
+}: {
+  id: string
+  title: string
+  countLabel: string
+  accent: 'amber' | 'zinc'
+  shelfBadge: string
+  children: React.ReactNode
+}) {
+  const niche =
+    accent === 'amber'
+      ? 'border-amber-200/70 bg-amber-50/40 dark:border-amber-900/40 dark:bg-amber-950/15'
+      : 'border-zinc-200/90 bg-zinc-100/50 dark:border-zinc-800 dark:bg-zinc-900/40'
+  const plankEdge =
+    accent === 'amber'
+      ? 'from-amber-200/95 to-amber-300/80 dark:from-amber-800/90 dark:to-amber-950/70'
+      : 'from-zinc-200 to-zinc-300/95 dark:from-zinc-600 dark:to-zinc-800'
+  const plankFront =
+    accent === 'amber'
+      ? 'bg-amber-300/90 shadow-[0_6px_14px_-4px_rgba(146,64,14,0.35)] dark:bg-amber-900/85 dark:shadow-[0_8px_20px_-4px_rgba(0,0,0,0.45)]'
+      : 'bg-zinc-300/90 shadow-[0_5px_12px_-4px_rgba(0,0,0,0.12)] dark:bg-zinc-700 dark:shadow-[0_8px_18px_-4px_rgba(0,0,0,0.35)]'
+
+  return (
+    <section aria-labelledby={id} className="relative">
+      <SectionHeading
+        id={id}
+        title={title}
+        accent={accent}
+        countLabel={countLabel}
+        shelfBadge={shelfBadge}
+      />
+      <div className={`rounded-t-xl border border-b-0 px-1 pb-2 pt-1 sm:px-2 sm:pb-2.5 sm:pt-1.5 ${niche}`}>
+        {children}
+      </div>
+      <div className="relative" aria-hidden>
+        <div className={`h-2 rounded-t-md bg-gradient-to-b sm:h-2.5 ${plankEdge}`} />
+        <div className={`h-2.5 rounded-b-md sm:h-3 ${plankFront}`} />
+      </div>
+    </section>
+  )
 }
 
 export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }) => {
@@ -30,7 +270,6 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
       setLoading(true)
       setError(null)
 
-      // Tek sorgu, sonuçları RLS belirler: admin tüm aktifleri, user ise public + atanmışları görür
       const { data, error } = await supabase
         .from('books')
         .select('*')
@@ -47,15 +286,14 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
     }
   }
 
-  // Filtreleme ve sıralama - kullanıcılar sadece aktif kitapları görür
   const filteredBooks = filterAndSortBooks(books, searchTerm, filters)
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex min-h-[16rem] items-center justify-center bg-zinc-50 dark:bg-zinc-950">
         <div className="text-center">
-          <BookOpen className="w-12 h-12 animate-pulse mx-auto mb-4 text-blue-600 dark:text-blue-400" />
-          <p className="text-gray-600 dark:text-gray-400">{t('common.loading')}</p>
+          <BookOpen className="mx-auto mb-3 h-10 w-10 animate-pulse text-sky-600 dark:text-sky-400" strokeWidth={1.25} />
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('common.loading')}</p>
         </div>
       </div>
     )
@@ -63,14 +301,13 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
 
   if (error) {
     return (
-      <div className="text-center py-12">
-        <div className="text-red-500 dark:text-red-400 mb-4">
-          <p className="text-lg font-medium">{t('common.error')}</p>
-          <p className="text-sm">{error}</p>
-        </div>
+      <div className="bg-zinc-50 py-12 text-center dark:bg-zinc-950">
+        <p className="text-base font-medium text-red-600 dark:text-red-400">{t('common.error')}</p>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{error}</p>
         <button
+          type="button"
           onClick={fetchBooks}
-          className="px-4 py-2 bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg"
+          className="mt-4 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           {t('common.retry')}
         </button>
@@ -78,22 +315,40 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
     )
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-800 transition-colors duration-300">
-      <div className="max-w-7xl mx-auto p-6 pt-8">
-        {/* Hero Section */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-gray-100 dark:to-gray-300 bg-clip-text text-transparent mb-4">
-            {t('library.title')}
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 max-w-2xl mx-auto mb-8">
-            {t('library.subtitle')}
-          </p>
-        </div>
+  const largeBooks = filteredBooks.filter((book) => book.book_size === 'large')
+  let smallBooks = filteredBooks.filter((book) => !book.book_size || book.book_size === 'small')
+  if (filters.sortBy === 'created_desc') {
+    smallBooks = [...smallBooks].sort((a, b) => a.title.localeCompare(b.title, 'tr'))
+  }
 
-        {/* Filters Section */}
-        <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-xl rounded-3xl border border-gray-200 dark:border-dark-700/30 shadow-xl overflow-hidden mb-8">
-          <div className="p-6">
+  return (
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="mx-auto max-w-7xl px-3 py-6 sm:px-5 sm:py-8">
+        <header className="mb-6 border-b border-zinc-200/90 pb-6 dark:border-zinc-800 sm:mb-7 sm:pb-7">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-xl">
+              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-3xl">
+                {t('library.title')}
+              </h1>
+              <p className="mt-1.5 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400 sm:mt-2 sm:text-sm">
+                {t('library.subtitle')}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs sm:gap-3 sm:text-sm">
+              <div className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-800 dark:bg-zinc-900 sm:px-3.5 sm:py-2">
+                <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{filteredBooks.length}</span>
+                <span className="ml-1.5 text-zinc-500 dark:text-zinc-400">{t('library.totalBooks')}</span>
+              </div>
+              <div className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-800 dark:bg-zinc-900 sm:px-3.5 sm:py-2">
+                <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">24/7</span>
+                <span className="ml-1.5 text-zinc-500 dark:text-zinc-400">{t('library.access')}</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="mb-7 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 sm:mb-8">
+          <div className="p-3 sm:p-4">
             <BookFilters
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
@@ -108,262 +363,65 @@ export const BookLibrary: React.FC<BookLibraryProps> = ({ onBookSelect, userId }
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 md:gap-6 mb-12">
-          <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-2xl p-6 border border-gray-200 dark:border-dark-700/30 text-center">
-            <div className="w-12 h-12 bg-blue-500 dark:bg-blue-400 rounded-xl flex items-center justify-center mx-auto mb-3">
-              <BookOpen className="w-6 h-6 text-white flex-shrink-0" />
-            </div>
-            <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{filteredBooks.length}</h3>
-            <p className="text-gray-600 dark:text-gray-400 text-sm">{t('library.totalBooks')}</p>
-          </div>
-          <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-2xl p-6 border border-gray-200 dark:border-dark-700/30 text-center">
-            <div className="w-12 h-12 bg-emerald-500 dark:bg-emerald-400 rounded-xl flex items-center justify-center mx-auto mb-3">
-              <div className="w-6 h-6 rounded-full bg-white dark:bg-dark-700 flex items-center justify-center">
-                <div className="w-2 h-2 bg-emerald-500 dark:bg-emerald-400 rounded-full animate-pulse flex-shrink-0"></div>
-              </div>
-            </div>
-            <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">24/7</h3>
-            <p className="text-gray-600 dark:text-gray-400 text-sm">{t('library.access')}</p>
-          </div>
-        </div>
-
-        {/* Book Grid */}
         {filteredBooks.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="bg-white/60 dark:bg-dark-800/60 backdrop-blur-sm rounded-3xl p-12 border border-gray-200 dark:border-dark-700/30 max-w-md mx-auto">
-              <div className="w-20 h-20 bg-gradient-to-r from-gray-200 to-gray-300 dark:from-dark-600 dark:to-dark-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <BookOpen className="w-10 h-10 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-                {searchTerm ? t('library.notFound') : t('library.noBooks')}
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-6">
-                {searchTerm ? t('library.notFoundSubtitle') : t('library.emptySubtitle')}
-              </p>
-              {(searchTerm || showFilters) && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('')
-                    setFilters(defaultFilters)
-                  }}
-                  className="px-6 py-2 bg-white dark:bg-dark-800/80 backdrop-blur-sm border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-xl transition-all duration-200 text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 rounded-xl"
-                >
-                  {t('library.clearSearch')}
-                </button>
-              )}
-            </div>
+          <div className="rounded-xl border border-dashed border-zinc-300 bg-white py-16 text-center dark:border-zinc-700 dark:bg-zinc-900/50">
+            <BookOpen className="mx-auto mb-4 h-12 w-12 text-zinc-300 dark:text-zinc-600" strokeWidth={1.25} />
+            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              {searchTerm ? t('library.notFound') : t('library.noBooks')}
+            </h3>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
+              {searchTerm ? t('library.notFoundSubtitle') : t('library.emptySubtitle')}
+            </p>
+            {(searchTerm || showFilters) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm('')
+                  setFilters(defaultFilters)
+                }}
+                className="mt-6 rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+              >
+                {t('library.clearSearch')}
+              </button>
+            )}
           </div>
         ) : (
-          <div className="space-y-12">
-            {/* Büyük Boy Kitaplar */}
-            {(() => {
-              const largeBooks = filteredBooks.filter(book => book.book_size === 'large')
-              if (largeBooks.length === 0) return null
-              return (
-                <div>
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl flex items-center justify-center shadow-lg">
-                      <BookOpen className="w-5 h-5 text-white flex-shrink-0" />
+          <div className="space-y-12 sm:space-y-14">
+            {largeBooks.length > 0 ? (
+              <Bookshelf
+                id="section-large"
+                title={t('admin.filter.sizeLarge')}
+                accent="amber"
+                countLabel={t('library.bookSectionCount', { count: largeBooks.length })}
+                shelfBadge={t('library.shelfUpper')}
+              >
+                <ShelfScroll>
+                  {largeBooks.map((book) => (
+                    <div key={book.id} className="snap-start" role="listitem">
+                      <BookCard book={book} variant="large" shelfRow onSelect={onBookSelect} t={t} />
                     </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{t('admin.filter.sizeLarge')}</h2>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">{largeBooks.length} {t('library.totalBooks').toLowerCase()}</p>
+                  ))}
+                </ShelfScroll>
+              </Bookshelf>
+            ) : null}
+
+            {smallBooks.length > 0 ? (
+              <Bookshelf
+                id="section-small"
+                title={t('admin.filter.sizeSmall')}
+                accent="zinc"
+                countLabel={t('library.bookSectionCount', { count: smallBooks.length })}
+                shelfBadge={t('library.shelfLower')}
+              >
+                <ShelfScroll>
+                  {smallBooks.map((book) => (
+                    <div key={book.id} className="snap-start" role="listitem">
+                      <BookCard book={book} variant="small" shelfRow onSelect={onBookSelect} t={t} />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                    {largeBooks.map((book, index) => (
-                      <div
-                        key={book.id}
-                        onClick={() => onBookSelect(book)}
-                        className="group cursor-pointer"
-                        style={{ animationDelay: `${index * 50}ms` }}
-                      >
-                        <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm rounded-2xl p-4 border-2 border-amber-300 dark:border-amber-600/50 shadow-lg hover:shadow-2xl transform hover:scale-[1.02] transition-all duration-300 group-hover:bg-white/90 dark:group-hover:bg-dark-700/90 ring-2 ring-amber-200/50 dark:ring-amber-700/30">
-                          {/* Book Cover */}
-                          <div className="aspect-[3/4] bg-gradient-to-br from-amber-500 via-orange-500 to-red-500 dark:from-amber-600 dark:via-orange-600 dark:to-red-600 rounded-xl relative overflow-hidden mb-4 shadow-lg">
-                            {book.cover_image ? (
-                              <img
-                                src={book.cover_image}
-                                alt={book.title}
-                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <BookOpen className="w-12 h-12 text-white opacity-80 flex-shrink-0" />
-                              </div>
-                            )}
-
-                            {/* Overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-                            {/* Play Icon */}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
-                              <div className="w-12 h-12 bg-white/90 dark:bg-dark-700/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
-                                <div className="w-0 h-0 border-l-[8px] border-l-amber-600 dark:border-l-amber-400 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent ml-1"></div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Book Info */}
-                          <div className="space-y-2">
-                            <h3 className="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors duration-200 text-sm leading-tight">
-                              {book.title}
-                            </h3>
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{book.author}</p>
-                            </div>
-                            {book.description && (
-                              <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2 leading-relaxed">
-                                {book.description}
-                              </p>
-                            )}
-                            {/* Badges at bottom */}
-                            <div className="mt-2 flex items-center gap-2 flex-wrap">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300">
-                                {t('admin.filter.sizeLarge')}
-                              </span>
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${book.language === 'en'
-                                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                                }`}>
-                                {book.language === 'en' ? 'EN' : 'TR'}
-                              </span>
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                                {((book as any).epub_file_path || '').toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}
-                              </span>
-                              {(book as any).audio_file_path && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
-                                  {t('library.audioBook')}
-                                </span>
-                              )}
-                              {book.is_public && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
-                                  {t('common.public')}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Read Button */}
-                          <div className="mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                            <div className="w-full py-2 px-4 bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-500 dark:to-orange-500 text-white text-xs font-semibold rounded-xl text-center shadow-lg">
-                              {t('common.startReading')}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })()}
-
-            {/* Küçük Boy Kitaplar */}
-            {(() => {
-              const smallBooks = filteredBooks.filter(book => !book.book_size || book.book_size === 'small')
-
-              // Varsayılan sıralama (En Yeni) seçiliyse, küçük kitapları alfabetik sırala
-              if (filters.sortBy === 'created_desc') {
-                smallBooks.sort((a, b) => a.title.localeCompare(b.title, 'tr'))
-              }
-
-              if (smallBooks.length === 0) return null
-              return (
-                <div>
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg">
-                      <BookOpen className="w-5 h-5 text-white flex-shrink-0" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{t('admin.filter.sizeSmall')}</h2>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">{smallBooks.length} {t('library.totalBooks').toLowerCase()}</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-                    {smallBooks.map((book, index) => (
-                      <div
-                        key={book.id}
-                        onClick={() => onBookSelect(book)}
-                        className="group cursor-pointer"
-                        style={{ animationDelay: `${index * 50}ms` }}
-                      >
-                        <div className="bg-white/80 dark:bg-dark-800/80 backdrop-blur-sm rounded-2xl p-4 border border-gray-200 dark:border-dark-700/30 shadow-lg hover:shadow-2xl transform hover:scale-[1.02] transition-all duration-300 group-hover:bg-white/90 dark:group-hover:bg-dark-700/90">
-                          {/* Book Cover */}
-                          <div className="aspect-[3/4] bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 dark:from-blue-600 dark:via-purple-600 dark:to-indigo-700 rounded-xl relative overflow-hidden mb-4 shadow-lg">
-                            {book.cover_image ? (
-                              <img
-                                src={book.cover_image}
-                                alt={book.title}
-                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <BookOpen className="w-12 h-12 text-white opacity-80 flex-shrink-0" />
-                              </div>
-                            )}
-
-                            {/* Overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-
-                            {/* Play Icon */}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
-                              <div className="w-12 h-12 bg-white/90 dark:bg-dark-700/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
-                                <div className="w-0 h-0 border-l-[8px] border-l-blue-600 dark:border-l-blue-400 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent ml-1"></div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Book Info */}
-                          <div className="space-y-2">
-                            <h3 className="font-bold text-gray-900 dark:text-gray-100 line-clamp-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors duration-200 text-sm leading-tight">
-                              {book.title}
-                            </h3>
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">{book.author}</p>
-                            </div>
-                            {book.description && (
-                              <p className="text-xs text-gray-500 dark:text-gray-500 line-clamp-2 leading-relaxed">
-                                {book.description}
-                              </p>
-                            )}
-                            {/* Badges at bottom */}
-                            <div className="mt-2 flex items-center gap-2 flex-wrap">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${book.language === 'en'
-                                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300'
-                                : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
-                                }`}>
-                                {book.language === 'en' ? 'EN' : 'TR'}
-                              </span>
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-                                {((book as any).epub_file_path || '').toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}
-                              </span>
-                              {(book as any).audio_file_path && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300">
-                                  {t('library.audioBook')}
-                                </span>
-                              )}
-                              {book.is_public && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300">
-                                  {t('common.public')}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Read Button */}
-                          <div className="mt-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                            <div className="w-full py-2 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-500 dark:to-indigo-500 text-white text-xs font-semibold rounded-xl text-center shadow-lg">
-                              {t('common.startReading')}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })()}
+                  ))}
+                </ShelfScroll>
+              </Bookshelf>
+            ) : null}
           </div>
         )}
       </div>
